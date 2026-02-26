@@ -1,0 +1,89 @@
+# Build Kodi for Windows using GitHub Actions
+# Based on the AppVeyor configuration, adapted for GitHub-hosted runners
+
+name: Build Kodi (Windows)
+
+on:
+  push:
+    branches: [main, master, Krypton]
+  pull_request:
+    branches: [main, master, Krypton]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: true
+          install: wget tar xz
+
+      - name: Bootstrap wget for DownloadBuildDeps
+        shell: msys2 {0}
+        run: |
+          mkdir -p project/BuildDependencies/bin
+          cp /usr/bin/wget.exe project/BuildDependencies/bin/
+
+      - name: Create MSYS2 junction
+        shell: cmd
+        run: |
+          if not exist project\BuildDependencies\msys64 mklink /j project\BuildDependencies\msys64 C:\msys64
+
+      - name: Download build dependencies
+        shell: cmd
+        run: |
+          cd project\BuildDependencies
+          call DownloadBuildDeps.bat
+        env:
+          KODI_MIRROR: http://mirrors.kodi.tv
+
+      - name: Install precompiled MinGW libraries
+        shell: msys2 {0}
+        run: |
+          pacman -S --noconfirm mingw-w64-i686-ffmpeg mingw-w64-i686-libdvdcss mingw-w64-i686-libdvdnav mingw-w64-i686-libdvdread
+
+      - name: Prepare MinGW libs for MSVC
+        shell: pwsh
+        run: |
+          $msysMingw = "C:\msys64\mingw32"
+          if (-not (Test-Path $msysMingw)) { throw "MSYS2 mingw32 not found at $msysMingw" }
+          New-Item -ItemType Directory -Force -Path project\BuildDependencies\lib | Out-Null
+          New-Item -ItemType Directory -Force -Path system | Out-Null
+          Get-ChildItem "$msysMingw\lib\lib*.dll.a" -ErrorAction SilentlyContinue | ForEach-Object {
+            $newName = $_.Name.Substring(3) -replace '\.dll\.a$', '.lib'
+            Copy-Item $_.FullName (Join-Path "project\BuildDependencies\lib" $newName) -Force
+          }
+          Copy-Item "$msysMingw\lib\*.a" "project\BuildDependencies\lib\" -Force -ErrorAction SilentlyContinue
+          Copy-Item "$msysMingw\include\*" "project\BuildDependencies\include\" -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item "$msysMingw\bin\*.dll" "system\" -Force -ErrorAction SilentlyContinue
+
+      - name: Configure CMake
+        shell: cmd
+        run: |
+          if not exist kodi-build mkdir kodi-build
+          cd kodi-build
+          cmake -G "Visual Studio 17 2022" -A Win32 ..\project\cmake
+
+      - name: Build Kodi
+        shell: cmd
+        run: |
+          cd kodi-build
+          cmake --build . --config Release --target all_build
+
+      - name: Upload Kodi build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kodi-Windows-x86
+          path: |
+            kodi-build/Release/
+            system/
