@@ -21,18 +21,12 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MSYS
-          update: true
-          install: wget tar xz
-
+      # MSYS2 is pre-installed on windows-2022 at C:\msys64 (no third-party action needed)
       - name: Bootstrap wget for DownloadBuildDeps
-        shell: msys2 {0}
+        shell: pwsh
         run: |
-          mkdir -p project/BuildDependencies/bin
-          cp /usr/bin/wget.exe project/BuildDependencies/bin/
+          New-Item -ItemType Directory -Force -Path project\BuildDependencies\bin | Out-Null
+          Copy-Item C:\msys64\usr\bin\wget.exe project\BuildDependencies\bin\
 
       - name: Create MSYS2 junction
         shell: cmd
@@ -48,7 +42,7 @@ jobs:
           KODI_MIRROR: http://mirrors.kodi.tv
 
       - name: Install precompiled MinGW libraries
-        shell: msys2 {0}
+        shell: C:\msys64\usr\bin\bash.exe -l -c "{0}"
         run: |
           pacman -S --noconfirm mingw-w64-i686-ffmpeg mingw-w64-i686-libdvdcss mingw-w64-i686-libdvdnav mingw-w64-i686-libdvdread
 
