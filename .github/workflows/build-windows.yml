@@ -21,55 +21,61 @@ jobs:
         with:
           fetch-depth: 1
 
-      # MSYS2 is pre-installed on windows-2022 at C:msys64 (no third-party action needed)
+      # MSYS2 is pre-installed on windows-2022 at C:\msys64 (no third-party action needed)
       - name: Bootstrap wget for DownloadBuildDeps
         shell: pwsh
-        run: &#124;
-          New-Item -ItemType Directory -Force -Path projectBuildDependenciesbin &#124; Out-Null
-          Copy-Item C:msys64usrbinwget.exe projectBuildDependenciesbin
+        run: |
+          New-Item -ItemType Directory -Force -Path project\BuildDependencies\bin | Out-Null
+          Copy-Item C:\msys64\usr\bin\wget.exe project\BuildDependencies\bin\
 
       - name: Create MSYS2 junction
         shell: cmd
-        run: &#124;
-          if not exist projectBuildDependenciesmsys64 mklink /j projectBuildDependenciesmsys64 C:msys64
-
+        run: |
+          if not exist project\BuildDependencies\msys64 mklink /j project\BuildDependencies\msys64 C:\msys64
       - name: Download build dependencies
         shell: cmd
-        run: &#124;
-          cd projectBuildDependencies
+        run: |         
+          cd project\BuildDependencies
+          dir
           call DownloadBuildDeps.bat
         env:
           KODI_MIRROR: http://mirrors.kodi.tv
 
+      # - name: Install precompiled MinGW libraries
+        # shell: C:\msys64\usr\bin\bash.exe -l -c "{0}"
+        # run: |
+          # pacman -S --noconfirm mingw-w64-i686-ffmpeg mingw-w64-i686-libdvdcss mingw-w64-i686-libdvdnav mingw-w64-i686-libdvdread
+
       - name: Install precompiled MinGW libraries
         shell: cmd
-        run: C:msys64usrbinbash.exe -l -c "pacman -S --noconfirm mingw-w64-i686-ffmpeg mingw-w64-i686-libdvdcss mingw-w64-i686-libdvdnav mingw-w64-i686-libdvdread"
+        run: C:\msys64\usr\bin\bash.exe -l -c "pacman -S --noconfirm mingw-w64-i686-ffmpeg mingw-w64-i686-libdvdcss mingw-w64-i686-libdvdnav mingw-w64-i686-libdvdread"
+
 
       - name: Prepare MinGW libs for MSVC
         shell: pwsh
-        run: &#124;
-          $msysMingw = "C:msys64mingw32"
+        run: |
+          $msysMingw = "C:\msys64\mingw32"
           if (-not (Test-Path $msysMingw)) { throw "MSYS2 mingw32 not found at $msysMingw" }
-          New-Item -ItemType Directory -Force -Path projectBuildDependencieslib &#124; Out-Null
-          New-Item -ItemType Directory -Force -Path system &#124; Out-Null
-          Get-ChildItem "$msysMingwliblib*.dll.a" -ErrorAction SilentlyContinue &#124; ForEach-Object {
-            $newName = $_.Name.Substring(3) -replace '.dll.a$', '.lib'
-            Copy-Item $_.FullName (Join-Path "projectBuildDependencieslib" $newName) -Force
+          New-Item -ItemType Directory -Force -Path project\BuildDependencies\lib | Out-Null
+          New-Item -ItemType Directory -Force -Path system | Out-Null
+          Get-ChildItem "$msysMingw\lib\lib*.dll.a" -ErrorAction SilentlyContinue | ForEach-Object {
+            $newName = $_.Name.Substring(3) -replace '\.dll\.a$', '.lib'
+            Copy-Item $_.FullName (Join-Path "project\BuildDependencies\lib" $newName) -Force
           }
-          Copy-Item "$msysMingwlib*.a" "projectBuildDependencieslib" -Force -ErrorAction SilentlyContinue
-          Copy-Item "$msysMingwinclude*" "projectBuildDependenciesinclude" -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item "$msysMingwbin*.dll" "system" -Force -ErrorAction SilentlyContinue
+          Copy-Item "$msysMingw\lib\*.a" "project\BuildDependencies\lib\" -Force -ErrorAction SilentlyContinue
+          Copy-Item "$msysMingw\include\*" "project\BuildDependencies\include\" -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item "$msysMingw\bin\*.dll" "system\" -Force -ErrorAction SilentlyContinue
 
       - name: Configure CMake
         shell: cmd
-        run: &#124;
+        run: |
           if not exist kodi-build mkdir kodi-build
           cd kodi-build
-          cmake -G "Visual Studio 17 2022" -A Win32 ..projectcmake
+          cmake -G "Visual Studio 17 2022" -A Win32 ..\project\cmake
 
       - name: Build Kodi
         shell: cmd
-        run: &#124;
+        run: |
           cd kodi-build
           cmake --build . --config Release --target all_build
 
@@ -77,6 +83,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Kodi-Windows-x86
-          path: &#124;
+          path: |
             kodi-build/Release/
             system/
