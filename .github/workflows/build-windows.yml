@@ -34,9 +34,9 @@ jobs:
           if not exist project\BuildDependencies\msys64 mklink /j project\BuildDependencies\msys64 C:\msys64
       - name: Download build dependencies
         shell: cmd
-        run: |
-          pwd
+        run: |         
           cd project\BuildDependencies
+          dir
           call DownloadBuildDeps.bat
         env:
           KODI_MIRROR: http://mirrors.kodi.tv
