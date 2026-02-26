@@ -32,10 +32,10 @@ jobs:
         shell: cmd
         run: |
           if not exist project\BuildDependencies\msys64 mklink /j project\BuildDependencies\msys64 C:\msys64
-
       - name: Download build dependencies
         shell: cmd
         run: |
+          pwd
           cd project\BuildDependencies
           call DownloadBuildDeps.bat
         env:
