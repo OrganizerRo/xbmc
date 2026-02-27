@@ -13,8 +13,8 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 620
-  
+    timeout-minutes: 120
+   
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,10 +28,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path project\BuildDependencies\bin | Out-Null
           Copy-Item C:\msys64\usr\bin\wget.exe project\BuildDependencies\bin\
           echo "C:\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "http://mirrors.kodi.tv" | Out-File -FilePath $env:KODI_MIRROR -Encoding utf8 -Append
           echo "C:\msys64\mingw32\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           # Verify the path update (optional)
           Write-Host "Updated PATH: $env:PATH"
-          
       - name: Create MSYS2 junction
         shell: cmd
         run: |
@@ -70,7 +70,7 @@ jobs:
         run: |
           if not exist kodi-build mkdir kodi-build
           cd kodi-build
-          cmake -G "Visual Studio 17 2022" -A Win32 -DENABLE_INTERNAL_FFMPEG=ON ..\project\cmake
+          cmake -G "Visual Studio 17 2022" -A Win32 -DENABLE_INTERNAL_FFMPEG=ON -DKODI_MIRROR=http://mirrors.kodi.tv ..\project\cmake
 
       - name: Build Kodi
         shell: cmd
