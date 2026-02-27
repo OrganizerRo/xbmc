@@ -214,20 +214,42 @@ endif()
 # Internal FFMPEG
 if(NOT FFMPEG_FOUND)
   include(ExternalProject)
-  file(STRINGS ${CORE_SOURCE_DIR}/tools/depends/target/ffmpeg/FFMPEG-VERSION VER)
-  string(REGEX MATCH "VERSION=[^ ]*$.*" FFMPEG_VER "${VER}")
-  list(GET FFMPEG_VER 0 FFMPEG_VER)
-  string(SUBSTRING "${FFMPEG_VER}" 8 -1 FFMPEG_VER)
-  string(REGEX MATCH "BASE_URL=([^ ]*)" FFMPEG_BASE_URL "${VER}")
-  list(GET FFMPEG_BASE_URL 0 FFMPEG_BASE_URL)
-  string(SUBSTRING "${FFMPEG_BASE_URL}" 9 -1 FFMPEG_BASE_URL)
+  set(FFMPEG_VERSION_FILE ${CORE_SOURCE_DIR}/tools/depends/target/ffmpeg/FFMPEG-VERSION)
+  if(NOT EXISTS ${FFMPEG_VERSION_FILE})
+    message(FATAL_ERROR "FFMPEG-VERSION file not found at ${FFMPEG_VERSION_FILE}. Cannot build internal FFmpeg.")
+  endif()
+  file(STRINGS ${FFMPEG_VERSION_FILE} VER)
+  # Parse VERSION= X.Y.Z (handles both "VERSION=8.0.1" and list format from file(STRINGS))
+  string(REGEX MATCH "VERSION=([0-9.]+)" _ver_match "${VER}")
+  if(_ver_match)
+    set(FFMPEG_VER "${CMAKE_MATCH_1}")
+  else()
+    message(FATAL_ERROR "Could not parse VERSION from ${FFMPEG_VERSION_FILE}. Expected format: VERSION=X.Y.Z")
+  endif()
+  # Parse BASE_URL if present; otherwise use KODI_MIRROR (aligned with tools/depends Makefile)
+  string(REGEX MATCH "BASE_URL=([^ \n;]+)" _base_match "${VER}")
+  if(_base_match)
+    set(FFMPEG_BASE_URL "${CMAKE_MATCH_1}")
+  else()
+    if(NOT DEFINED KODI_MIRROR)
+      set(KODI_MIRROR "http://mirrors.kodi.tv")
+    endif()
+    set(FFMPEG_BASE_URL "${KODI_MIRROR}/build-deps/sources")
+  endif()
+  # Archive: FFMPEG-VERSION may use ARCHIVE=$(LIBNAME)-$(VERSION).tar.xz
+  string(REGEX MATCH "ARCHIVE=([^ \n;$]+)" _arch_match "${VER}")
+  if(_arch_match AND NOT CMAKE_MATCH_1 MATCHES "\\$")
+    set(FFMPEG_ARCHIVE "${CMAKE_MATCH_1}")
+  else()
+    set(FFMPEG_ARCHIVE "ffmpeg-${FFMPEG_VER}.tar.xz")
+  endif()
 
   # allow user to override the download URL with a local tarball
   # needed for offline build envs
   if(FFMPEG_URL)
     get_filename_component(FFMPEG_URL "${FFMPEG_URL}" ABSOLUTE)
   else()
-    set(FFMPEG_URL ${FFMPEG_BASE_URL}/${FFMPEG_VER}.tar.gz)
+    set(FFMPEG_URL ${FFMPEG_BASE_URL}/${FFMPEG_ARCHIVE})
   endif()
   if(VERBOSE)
     message(STATUS "FFMPEG_URL: ${FFMPEG_URL}")
@@ -246,7 +268,7 @@ if(NOT FFMPEG_FOUND)
 
   externalproject_add(ffmpeg
                       URL ${FFMPEG_URL}
-                      DOWNLOAD_NAME ffmpeg-${FFMPEG_VER}.tar.gz
+                      DOWNLOAD_NAME ${FFMPEG_ARCHIVE}
                       DOWNLOAD_DIR ${CMAKE_BINARY_DIR}/${CORE_BUILD_DIR}/download
                       PREFIX ${CORE_BUILD_DIR}/ffmpeg
                       CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/${CORE_BUILD_DIR}
