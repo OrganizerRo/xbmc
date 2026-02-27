@@ -64,6 +64,10 @@ jobs:
           Copy-Item "$msysMingw\include\*" "project\BuildDependencies\include\" -Recurse -Force -ErrorAction SilentlyContinue
           Get-ChildItem "$msysMingw\bin\*.dll" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'dvd|dvdcss' } | Copy-Item -Destination "system\" -Force
 
+      - name: Install SWIG
+        shell: pwsh
+        run: choco install swig -y
+
       - name: Configure CMake
         shell: cmd
         env:
