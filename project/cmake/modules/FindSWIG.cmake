@@ -19,8 +19,13 @@ if(SWIG_EXECUTABLE)
     OUTPUT_VARIABLE SWIG_version_output
     ERROR_VARIABLE SWIG_version_output
     RESULT_VARIABLE SWIG_version_result)
-    string(REGEX REPLACE ".*SWIG Version[^0-9.]*\([0-9.]+\).*" "\\1"
-           SWIG_VERSION "${SWIG_version_output}")
+  string(REGEX REPLACE ".*SWIG Version[^0-9.]*\([0-9.]+\).*" "\\1"
+         SWIG_VERSION "${SWIG_version_output}")
+  # Create SWIG::SWIG imported target immediately (required by xbmc/interfaces/swig/CMakeLists.txt)
+  if(NOT TARGET SWIG::SWIG)
+    add_executable(SWIG::SWIG IMPORTED)
+    set_target_properties(SWIG::SWIG PROPERTIES IMPORTED_LOCATION "${SWIG_EXECUTABLE}")
+  endif()
 endif()
 
 include(FindPackageHandleStandardArgs)
