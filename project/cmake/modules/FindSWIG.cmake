@@ -27,3 +27,11 @@ include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(SWIG
                                   REQUIRED_VARS SWIG_EXECUTABLE SWIG_DIR
                                   VERSION_VAR SWIG_VERSION)
+
+# Create SWIG::SWIG imported target for compatibility with CMake code that expects it
+# (e.g. get_target_property with SWIG::SWIG, or COMMAND references)
+if(SWIG_FOUND AND NOT TARGET SWIG::SWIG)
+  add_executable(SWIG::SWIG IMPORTED)
+  set_target_properties(SWIG::SWIG PROPERTIES
+    IMPORTED_LOCATION "${SWIG_EXECUTABLE}")
+endif()
