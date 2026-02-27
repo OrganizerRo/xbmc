@@ -82,10 +82,16 @@ add_custom_target(${APP_NAME_LC}-libraries)
 set(LIBRARY_FILES "" CACHE STRING "" FORCE)
 mark_as_advanced(LIBRARY_FILES)
 
+# Determine gtest include path (either from lib/gtest or FetchContent)
+set(GTEST_INCLUDE_DIR "")
+if(EXISTS ${CORE_SOURCE_DIR}/lib/gtest)
+  set(GTEST_INCLUDE_DIR ${CORE_SOURCE_DIR}/lib/gtest/include)
+endif()
+
 set(INCLUDES ${CORE_SOURCE_DIR}
              ${CORE_SOURCE_DIR}/addons/library.xbmc.addon
              ${CORE_SOURCE_DIR}/lib
-             ${CORE_SOURCE_DIR}/lib/gtest/include
+             ${GTEST_INCLUDE_DIR}
              ${CORE_SOURCE_DIR}/xbmc
              ${CORE_SOURCE_DIR}/xbmc/${PLATFORM_DIR}
              ${CORE_SOURCE_DIR}/xbmc/cores/VideoPlayer
@@ -260,7 +266,22 @@ mark_as_advanced(core_DEPENDS)
 mark_as_advanced(test_archives)
 mark_as_advanced(test_sources)
 
-add_subdirectory(${CORE_SOURCE_DIR}/lib/gtest ${CORE_BUILD_DIR}/gtest EXCLUDE_FROM_ALL)
+# GoogleTest: use lib/gtest if present, otherwise FetchContent
+if(EXISTS ${CORE_SOURCE_DIR}/lib/gtest/CMakeLists.txt)
+  add_subdirectory(${CORE_SOURCE_DIR}/lib/gtest ${CORE_BUILD_DIR}/gtest EXCLUDE_FROM_ALL)
+else()
+  include(FetchContent)
+  FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.14.0
+  )
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googletest)
+  if(NOT GTEST_INCLUDE_DIR)
+    set(GTEST_INCLUDE_DIR ${googletest_SOURCE_DIR}/googletest/include ${googletest_SOURCE_DIR}/googlemock/include)
+  endif()
+endif()
 set_target_properties(gtest PROPERTIES FOLDER "External Projects")
 
 # copy files to build tree

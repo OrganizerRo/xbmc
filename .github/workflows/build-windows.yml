@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          submodules: recursive
 
       # MSYS2 is pre-installed on windows-2022 at C:\msys64 (no third-party action needed)
       - name: Bootstrap wget for DownloadBuildDeps

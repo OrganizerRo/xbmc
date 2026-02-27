@@ -680,3 +680,36 @@ macro(core_find_versions)
   endif()
 endmacro()
 
+# Split dependency specification string into name and optional version
+# Arguments:
+#   depspec Dependency spec in form [package name] or [package name]=[version]
+#   name_outvar Variable that receives the package name
+#   version_outvar Variable that receives the version part (optional)
+function(split_dependency_specification depspec name_outvar version_outvar)
+  if(${depspec} MATCHES "^([^>]*)(>?=[0-9.]+)$")
+    set(${name_outvar} ${CMAKE_MATCH_1} PARENT_SCOPE)
+    set(${version_outvar} ${CMAKE_MATCH_2} PARENT_SCOPE)
+  else()
+    set(${name_outvar} ${depspec} PARENT_SCOPE)
+    unset(${version_outvar} PARENT_SCOPE)
+  endif()
+endfunction()
+
+# Iterate over optional/required dep lists and link any created targets
+# to the target supplied as first argument
+function(core_target_link_libraries core_lib)
+  foreach(_depspec ${required_deps})
+    split_dependency_specification(${_depspec} dep version)
+    if(TARGET ${APP_NAME_LC}::${dep})
+      target_link_libraries(${core_lib} PUBLIC ${APP_NAME_LC}::${dep})
+    endif()
+  endforeach()
+
+  foreach(_depspec ${optional_deps})
+    split_dependency_specification(${_depspec} dep version)
+    if(TARGET ${APP_NAME_LC}::${dep})
+      target_link_libraries(${core_lib} PUBLIC ${APP_NAME_LC}::${dep})
+    endif()
+  endforeach()
+endfunction()
+
