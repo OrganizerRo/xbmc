@@ -13,7 +13,9 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 600
+    env:
+      PATH: C:\msys64\usr\bin;C:\msys64\mingw32\bin;${{ env.PATH }}
 
     steps:
       - name: Checkout repository
@@ -32,46 +34,41 @@ jobs:
         shell: cmd
         run: |
           if not exist project\BuildDependencies\msys64 mklink /j project\BuildDependencies\msys64 C:\msys64
+
       - name: Download build dependencies
         shell: cmd
-        run: |         
+        run: |
           cd project\BuildDependencies
-          dir
           call DownloadBuildDeps.bat
         env:
           KODI_MIRROR: http://mirrors.kodi.tv
 
-      # - name: Install precompiled MinGW libraries
-        # shell: C:\msys64\usr\bin\bash.exe -l -c "{0}"
-        # run: |
-          # pacman -S --noconfirm mingw-w64-i686-ffmpeg mingw-w64-i686-libdvdcss mingw-w64-i686-libdvdnav mingw-w64-i686-libdvdread
-
-      - name: Install precompiled MinGW libraries
+      # FFmpeg 3.1 with libpostproc: MSYS2's current FFmpeg (4.x+) removed libpostproc.
+      # Use ENABLE_INTERNAL_FFMPEG=ON to build FFmpeg 3.1 from Kodi's fork.
+      - name: Install MinGW libdvd libraries (libdvdcss, libdvdnav, libdvdread)
         shell: cmd
-        run: C:\msys64\usr\bin\bash.exe -l -c "pacman -S --noconfirm mingw-w64-i686-ffmpeg mingw-w64-i686-libdvdcss mingw-w64-i686-libdvdnav mingw-w64-i686-libdvdread"
+        run: C:\msys64\usr\bin\bash.exe -l -c "pacman -S --noconfirm mingw-w64-i686-libdvdcss mingw-w64-i686-libdvdnav mingw-w64-i686-libdvdread"
 
-
-      - name: Prepare MinGW libs for MSVC
+      - name: Prepare MinGW libdvd libs for MSVC
         shell: pwsh
         run: |
           $msysMingw = "C:\msys64\mingw32"
           if (-not (Test-Path $msysMingw)) { throw "MSYS2 mingw32 not found at $msysMingw" }
           New-Item -ItemType Directory -Force -Path project\BuildDependencies\lib | Out-Null
           New-Item -ItemType Directory -Force -Path system | Out-Null
-          Get-ChildItem "$msysMingw\lib\lib*.dll.a" -ErrorAction SilentlyContinue | ForEach-Object {
+          Get-ChildItem "$msysMingw\lib\lib*.dll.a" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'dvd|dvdcss' } | ForEach-Object {
             $newName = $_.Name.Substring(3) -replace '\.dll\.a$', '.lib'
             Copy-Item $_.FullName (Join-Path "project\BuildDependencies\lib" $newName) -Force
           }
-          Copy-Item "$msysMingw\lib\*.a" "project\BuildDependencies\lib\" -Force -ErrorAction SilentlyContinue
           Copy-Item "$msysMingw\include\*" "project\BuildDependencies\include\" -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item "$msysMingw\bin\*.dll" "system\" -Force -ErrorAction SilentlyContinue
+          Get-ChildItem "$msysMingw\bin\*.dll" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'dvd|dvdcss' } | Copy-Item -Destination "system\" -Force
 
       - name: Configure CMake
         shell: cmd
         run: |
           if not exist kodi-build mkdir kodi-build
           cd kodi-build
-          cmake -G "Visual Studio 17 2022" -A Win32 ..\project\cmake
+          cmake -G "Visual Studio 17 2022" -A Win32 -DENABLE_INTERNAL_FFMPEG=ON ..\project\cmake
 
       - name: Build Kodi
         shell: cmd
