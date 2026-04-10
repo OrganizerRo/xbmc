@@ -9,7 +9,13 @@ trap 'rm -f "$BGPROCESSFILE"' EXIT
 
 [[ -z "$LOCALBUILDDIR" ]] && { echo "ERROR: LOCALBUILDDIR is not set"; exit 1; }
 
-MAKEFLAGS="${MAKEFLAGS:--j$(( $(nproc) / 2 + 1 ))}"
+if [[ -z "$MAKEFLAGS" ]]; then
+  if [[ "${NUMBER_OF_PROCESSORS:-0}" -gt 1 ]]; then
+    MAKEFLAGS="-j$(( NUMBER_OF_PROCESSORS + NUMBER_OF_PROCESSORS / 2 ))"
+  else
+    MAKEFLAGS="-j2"
+  fi
+fi
 
 # Default prefix for all libdvd artifacts. Override via LIBDVDPREFIX env var if needed.
 LIBDVDPREFIX="${LIBDVDPREFIX:-/xbmc/lib/libdvd}"

@@ -71,6 +71,12 @@ if(GNUTLS_FOUND)
   list(APPEND ffmpeg_conf --enable-gnutls)
 endif()
 
+if(WIN32)
+  list(APPEND ffmpeg_conf --enable-w32threads)
+else()
+  list(APPEND ffmpeg_conf --enable-pthreads)
+endif()
+
 message(STATUS "FFMPEG_CONF: ${ffmpeg_conf}")
 
 include(ExternalProject)
@@ -89,7 +95,6 @@ externalproject_add(ffmpeg
                       --enable-gpl
                       --enable-runtime-cpudetect
                       --enable-postproc
-                      --enable-pthreads
                       --enable-muxer=spdif
                       --enable-muxer=adts
                       --enable-muxer=asf

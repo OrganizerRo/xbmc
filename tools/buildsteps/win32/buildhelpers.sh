@@ -13,7 +13,7 @@ if [ "${NUMBER_OF_PROCESSORS:-0}" -gt 1 ]; then
   fi
 fi
 if [[ ! $cpuCount =~ ^[0-9]+$ ]]; then
-  cpuCount="$(($(nproc)/2))"
+  cpuCount=2
 fi
 
 if which tput >/dev/null 2>&1; then
@@ -95,11 +95,11 @@ get_last_version() {
   local filelist="$1"
   local filter="$2"
   local version="$3"
-  local ret=$(echo "$filelist" | /usr/bin/grep -E "$filter" | sort -V | tail -1)
+  local ret=$(echo "$filelist" | grep -E "$filter" | sort -V | tail -1)
   if [[ -z "$version" ]]; then
     echo $ret
   else
-    echo $ret | /usr/bin/grep -oP "$version"
+    echo $ret | grep -oE "$version"
   fi
 }
 
