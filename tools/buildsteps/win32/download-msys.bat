@@ -35,15 +35,9 @@ IF NOT EXIST %MSYS_INSTALL_PATH% md %MSYS_INSTALL_PATH%
 IF NOT EXIST %MINGW_INSTALL_PATH% md %MINGW_INSTALL_PATH%
 IF NOT EXIST %TMP_PATH% md %TMP_PATH%
 
-cd scripts
-
-IF NOT EXIST get_msys_env.bat (ECHO ERROR: get_msys_env.bat not found in scripts directory & EXIT /B 1)
-CALL get_msys_env.bat
-IF %ERRORLEVEL% NEQ 0 (ECHO ERROR: get_msys_env.bat failed with exit code %ERRORLEVEL% & EXIT /B 1)
-IF EXIST %TMP_PATH% rmdir %TMP_PATH% /S /Q
-IF NOT EXIST get_mingw_env.bat (ECHO ERROR: get_mingw_env.bat not found in scripts directory & EXIT /B 1)
-CALL get_mingw_env.bat
-IF %ERRORLEVEL% NEQ 0 (ECHO ERROR: get_mingw_env.bat failed with exit code %ERRORLEVEL% & EXIT /B 1)
+rem Install msys2 and mingw environment via DownloadMingwBuildEnv.bat
+CALL "%CUR_PATH%\DownloadMingwBuildEnv.bat"
+IF %ERRORLEVEL% NEQ 0 (ECHO ERROR: DownloadMingwBuildEnv.bat failed with exit code %ERRORLEVEL% & EXIT /B 1)
 
 cd %CUR_PATH%
 

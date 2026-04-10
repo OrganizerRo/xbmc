@@ -137,47 +137,16 @@ export PKG_CONFIG_PATH="$LOCALDESTDIR/lib/pkgconfig:$LOCALDESTDIR/share/pkgconfi
 
 cd $LOCALBUILDDIR
 
+# GnuTLS is provided by the MSYS2 mingw-w64-i686-gnutls package (installed
+# via pacman in the CI workflow).  Verify pkg-config can find it.
 if do_checkForOptions "--enable-gnutls"; then
-if do_pkgConfig "gnutls = $GNUTLS_VER"; then
-  if [[ ! -f "gnutls-${GNUTLS_VER}.tar.xz" ]]; then
-    do_wget "https://mirrors.xbmc.org/build-deps/sources/gnutls-${GNUTLS_VER}.tar.xz"
+  if ! pkg-config --exists gnutls 2>/dev/null; then
+    echo "ERROR: gnutls not found via pkg-config."
+    echo "       Install it with: pacman -S mingw-w64-i686-gnutls"
+    echo "       PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+    exit 1
   fi
-  if [ -d "gnutls-${GNUTLS_VER}" ]; then
-    rm -r "gnutls-${GNUTLS_VER}"
-  fi
-  tar -xaf "gnutls-${GNUTLS_VER}.tar.xz"
-  cd "gnutls-${GNUTLS_VER}"
-
-  # Fix nettle 3.4+ API: struct variables replaced by getter functions
-  sed -i 's/return &nettle_secp_192r1;/return nettle_get_secp_192r1();/g' lib/nettle/pk.c
-  sed -i 's/return &nettle_secp_224r1;/return nettle_get_secp_224r1();/g' lib/nettle/pk.c
-  sed -i 's/return &nettle_secp_256r1;/return nettle_get_secp_256r1();/g' lib/nettle/pk.c
-  sed -i 's/return &nettle_secp_384r1;/return nettle_get_secp_384r1();/g' lib/nettle/pk.c
-  sed -i 's/return &nettle_secp_521r1;/return nettle_get_secp_521r1();/g' lib/nettle/pk.c
-
-  # Fix system-keys-win.c for newer GCC: NCRYPT_KEY_HANDLE/NCRYPT_PROV_HANDLE
-  # are ULONG_PTR (integer types), not pointers — NULL causes -Wint-conversion errors
-  sed -i 's/NCRYPT_KEY_HANDLE nc = NULL;/NCRYPT_KEY_HANDLE nc = 0;/' lib/system-keys-win.c
-  sed -i 's/NCRYPT_PROV_HANDLE sctx = NULL;/NCRYPT_PROV_HANDLE sctx = 0;/' lib/system-keys-win.c
-  # Fix const qualifier discard: tmp.data is unsigned char*, p is const char*
-  sed -i 's/tmp\.data = p;/tmp.data = (unsigned char *)p;/' lib/system-keys-win.c
-
-  do_print_status "gnutls-${GNUTLS_VER}" "$blue_color" "Configuring"
-
-  rm -rf $LOCALDESTDIR/include/gnutls
-  rm -f $LOCALDESTDIR/lib/{libgnutls*,pkgconfig/gnutls.pc}
-  rm -f $LOCALDESTDIR/bin-global/{gnutls-*,{psk,cert,srp,ocsp}tool}.exe
-
-  ./configure --prefix=$LOCALDESTDIR --disable-shared --build="$MINGW_CHOST" --disable-cxx \
-      --disable-doc --disable-tools --disable-tests --without-p11-kit --disable-rpath \
-      --disable-libdane --without-idn --without-tpm --enable-local-libopts --disable-guile \
-      --disable-hardware-acceleration || exit 1
-  sed -i 's/-lgnutls *$/-lgnutls -lnettle -lhogweed -lcrypt32 -lws2_32 -lz -lgmp -lintl -liconv/' \
-  lib/gnutls.pc
-  do_print_status "gnutls-${GNUTLS_VER}" "$blue_color" "Compiling"
-  do_makeinstall 
-  do_pkgConfig "gnutls = $GNUTLS_VER";
-fi
+  do_print_status "gnutls (system)" "$green_color" "Found $(pkg-config --modversion gnutls)"
 fi
 
 do_clean_get $1

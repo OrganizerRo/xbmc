@@ -11,7 +11,7 @@ IF NOT EXIST %msys_dir% (SET msys_dir=%builddeps_dir%\msys32)
 SET awk_exe=%msys_dir%\usr\bin\awk.exe
 SET sed_exe=%msys_dir%\usr\bin\sed.exe
 IF NOT EXIST "%awk_exe%" (
-  set DIETEXT=awk not found at %awk_exe% - run download-msys.bat first
+  set DIETEXT=awk not found at %awk_exe% - run DownloadMingwBuildEnv.bat first
   goto DIE
 )
 

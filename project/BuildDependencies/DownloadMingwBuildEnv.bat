@@ -28,9 +28,9 @@ set build32=yes
 set build64=no
 set instdir=%CD%
 set msyspackages=autoconf automake libtool m4 make gettext patch pkg-config wget p7zip coreutils
-set mingwpackages=dlfcn gcc gcc-libs gettext libiconv libgpg-error libpng yasm nettle libtasn1 openssl xz
-set locals32=gnutls-3.4.14-static
-set locals64=gnutls-3.4.14-static
+set mingwpackages=dlfcn gcc gcc-libs gettext libiconv libgpg-error libpng yasm nettle libtasn1 openssl xz gnutls
+set locals32=
+set locals64=
 set usemirror=yes
 set opt=mintty
 
@@ -80,19 +80,18 @@ if exist "%downloaddir%\%msysfile%" GOTO unpack
     echo.- Download msys2 basic system (Kodi mirrors: %usemirror%)
     echo -------------------------------------------------------------------------------
 
-    set msysurl=http://sourceforge.net/projects/msys2/files/Base/%arch%/%msysfile%/download
-    if %usemirror%==yes (
-        ::download msys2 from our mirror
-        set msysurl=%MSYS_MIRROR%/%msysfile%
+    set msysurl=%MSYS_MIRROR%/%msysfile%
+    if not %usemirror%==yes (
+        echo ERROR: MSYS2 base system is only available from the Kodi mirror.
+        echo        Set KODI_MIRROR or ensure usemirror=yes.
+        echo        Alternatively, download manually from https://github.com/msys2/msys2-installer/releases
+        exit /B 1
     )
     %instdir%\bin\wget --tries=20 --retry-connrefused --waitretry=2 --no-check-certificate -c -O %downloaddir%\%msysfile% %msysurl%
     if errorlevel == 1 (
         if exist "%downloaddir%\%msysfile%" del %downloaddir%\%msysfile%
-        if %usemirror%==yes (
-            set usemirror=no
-            goto download
-        )
-        echo ERROR: Unable to download msys2!
+        echo ERROR: Unable to download msys2 from %msysurl%
+        echo        Try downloading manually from https://github.com/msys2/msys2-installer/releases
         exit /B 1
     )
 
