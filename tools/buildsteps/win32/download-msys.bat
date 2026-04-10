@@ -6,7 +6,7 @@ SET CUR_PATH=%WORKSPACE%\project\BuildDependencies
 SET APP_PATH=%WORKSPACE%
 SET TMP_PATH=%CUR_PATH%\scripts\tmp
 
-SET MSYS_INSTALL_PATH="%CUR_PATH%\msys"
+SET MSYS_INSTALL_PATH="%CUR_PATH%\msys64"
 SET MINGW_INSTALL_PATH="%CUR_PATH%\msys\mingw"
 
 cd %CUR_PATH%
@@ -42,11 +42,11 @@ rem update fstab to install path
 SET FSTAB=%MINGW_INSTALL_PATH%
 SET FSTAB=%FSTAB:\=/%
 SET FSTAB=%FSTAB:"=%
-ECHO %FSTAB% /mingw>>"%MSYS_INSTALL_PATH%\etc\fstab"
-SET FSTAB=%APP_PATH%
-SET FSTAB=%FSTAB:\=/%
-SET FSTAB=%FSTAB:"=%
-ECHO %FSTAB% /xbmc>>"%MSYS_INSTALL_PATH%\etc\fstab"
+FINDSTR /C:"/mingw" "%MSYS_INSTALL_PATH%\etc\fstab" >NUL 2>&1 || ECHO %FSTAB% /mingw>>"%MSYS_INSTALL_PATH%\etc\fstab"
+SET FSTAB2=%APP_PATH%
+SET FSTAB2=%FSTAB2:\=/%
+SET FSTAB2=%FSTAB2:"=%
+FINDSTR /C:"/xbmc" "%MSYS_INSTALL_PATH%\etc\fstab" >NUL 2>&1 || ECHO %FSTAB2% /xbmc>>"%MSYS_INSTALL_PATH%\etc\fstab"
 
 rem patch mingw headers to compile ffmpeg
 xcopy mingw_support\postinstall\* "%MSYS_INSTALL_PATH%\postinstall\" /E /Q /I /Y
@@ -58,7 +58,10 @@ cd %CUR_PATH%
 rem insert call to vsvars32.bat in msys.bat
 cd %MSYS_INSTALL_PATH%
 Move msys.bat msys.bat_dist
-ECHO CALL "%VS140COMNTOOLS%\..\..\VC\bin\vcvars32.bat">>msys.bat
+FOR /F "usebackq tokens=*" %%i IN (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) DO SET VSINSTALLDIR=%%i
+IF NOT "%VSINSTALLDIR%"=="" (
+  ECHO CALL "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars32.bat">>msys.bat
+)
 TYPE msys.bat_dist>>msys.bat
 
 cd %CUR_PATH%

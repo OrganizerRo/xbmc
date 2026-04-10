@@ -103,11 +103,12 @@ jobs:
       #   DLLs    -> system/  (copied by the build scripts)
       - name: Build FFmpeg and libdvd from source
         if: steps.mingw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 60
         shell: cmd
         env:
           MSYSTEM: MINGW32
         run: >
-          bash --login
+          bash --login -e
           /xbmc/tools/buildsteps/win32/make-mingwlibs.sh
           --prompt=noprompt
           --mode=clean

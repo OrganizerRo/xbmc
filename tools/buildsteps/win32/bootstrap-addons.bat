@@ -18,7 +18,8 @@ if "%1" == "clean" (
 )
 
 rem set Visual C++ build environment
-call "%VS140COMNTOOLS%..\..\VC\bin\vcvars32.bat"
+CALL "%~dp0find-vs.bat" || EXIT /B 1
+call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvarsall.bat" x86 || exit /b 1
 
 SET WORKDIR=%WORKSPACE%
 
@@ -84,6 +85,7 @@ rem execute nmake to prepare the buildsystem
 nmake
 IF ERRORLEVEL 1 (
   ECHO nmake failed with error level: %ERRORLEVEL%
+  GOTO ERROR
 )
 rem everything was fine
 GOTO END

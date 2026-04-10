@@ -26,23 +26,19 @@ SET buildconfig=Debug Testsuite
 set WORKSPACE=%CD%\..\..
 
 
-  REM look for MSBuild.exe delivered with Visual Studio 2015
-  FOR /F "tokens=2,* delims= " %%A IN ('REG QUERY HKLM\SOFTWARE\Microsoft\MSBuild\ToolsVersions\14.0 /v MSBuildToolsRoot') DO SET MSBUILDROOT=%%B
-  SET NET="%MSBUILDROOT%14.0\bin\MSBuild.exe"
-
-  IF EXIST "!NET!" (
-    set msbuildemitsolution=1
-    set OPTS_EXE="..\VS2010Express\XBMC for Windows.sln" /t:Build /p:Configuration="%buildconfig%" /property:VCTargetsPath="%MSBUILDROOT%Microsoft.Cpp\v4.0\V140" /m
-    set CLEAN_EXE="..\VS2010Express\XBMC for Windows.sln" /t:Clean /p:Configuration="%buildconfig%" /property:VCTargetsPath="%MSBUILDROOT%Microsoft.Cpp\v4.0\V140"
-  )
-
-  IF NOT EXIST %NET% (
+  REM look for MSBuild.exe using vswhere
+  FOR /F "usebackq tokens=*" %%i IN (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe`) DO SET NET="%%i"
+  IF NOT DEFINED NET (
     set DIETEXT=MSBuild was not found.
     goto DIE
   )
-  
-  set EXE= "..\VS2010Express\XBMC\%buildconfig%\%APP_NAME%-test.exe"
-  set PDB= "..\VS2010Express\XBMC\%buildconfig%\%APP_NAME%.pdb"
+
+  set msbuildemitsolution=1
+  set OPTS_EXE="..\cmake\kodi.sln" /t:Build /p:Configuration="%buildconfig%" /m
+  set CLEAN_EXE="..\cmake\kodi.sln" /t:Clean /p:Configuration="%buildconfig%"
+
+  set EXE= "..\cmake\kodi\%buildconfig%\%APP_NAME%-test.exe"
+  set PDB= "..\cmake\kodi\%buildconfig%\%APP_NAME%.pdb"
   
   :: sets the BRANCH env var
   call getbranch.bat
@@ -57,8 +53,8 @@ ECHO Compiling testsuite...
 %NET% %OPTS_EXE%
 
 IF %errorlevel%==1 (
-  set DIETEXT="%APP_NAME%-test.exe failed to build!  See %CD%\..\vs2010express\XBMC\%buildconfig%\objs\XBMC.log"
-  type "%CD%\..\vs2010express\XBMC\%buildconfig%\objs\XBMC.log"
+  set DIETEXT="%APP_NAME%-test.exe failed to build!  See %CD%\..\cmake\kodi\%buildconfig%\objs\XBMC.log"
+  type "%CD%\..\cmake\kodi\%buildconfig%\objs\XBMC.log"
   goto DIE
 )
 ECHO Done building!
@@ -66,7 +62,7 @@ ECHO ------------------------------------------------------------
 
 :RUNTESTSUITE
 ECHO Running testsuite...
-  cd %WORKSPACE%\project\vs2010express\
+  cd %WORKSPACE%\project\cmake\
   set KODI_HOME=%WORKSPACE%
   set PATH=%WORKSPACE%\system;%PATH%
 

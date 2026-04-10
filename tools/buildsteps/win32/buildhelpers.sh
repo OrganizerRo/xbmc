@@ -5,8 +5,8 @@ BGPROCESSFILE="$2"
 tools="$3"
 
 cpuCount=1
-if [ $NUMBER_OF_PROCESSORS > 1 ]; then
-  if [ $NUMBER_OF_PROCESSORS > 4 ]; then
+if [ "${NUMBER_OF_PROCESSORS:-0}" -gt 1 ]; then
+  if [ "${NUMBER_OF_PROCESSORS:-0}" -gt 4 ]; then
     cpuCount=6
   else
     cpuCount=`expr $NUMBER_OF_PROCESSORS + $NUMBER_OF_PROCESSORS / 2`
@@ -34,9 +34,9 @@ do_wget() {
   local archive="$2"
 
   if [[ -z $archive ]]; then
-    wget --tries=5 --retry-connrefused --waitretry=2 --no-check-certificate -c $URL
+    wget --tries=5 --retry-connrefused --waitretry=2 -c $URL
   else
-    wget --tries=5 --retry-connrefused --waitretry=2 --no-check-certificate -c $URL -O $archive
+    wget --tries=5 --retry-connrefused --waitretry=2 -c $URL -O $archive
   fi
 }
 

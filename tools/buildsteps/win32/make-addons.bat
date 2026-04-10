@@ -24,7 +24,8 @@ FOR %%b IN (%*) DO (
 SETLOCAL DisableDelayedExpansion
 
 rem set Visual C++ build environment
-call "%VS140COMNTOOLS%..\..\VC\bin\vcvars32.bat"
+CALL "%~dp0find-vs.bat" || EXIT /B 1
+call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvarsall.bat" %vcarch% || exit /b 1
 
 SET WORKDIR=%base_dir%
 
@@ -136,13 +137,13 @@ FOR %%a IN (%ADDONS_TO_MAKE%) DO (
   rem execute nmake to build the addons
   nmake %%a
   IF ERRORLEVEL 1 (
-    ECHO nmake %%a error level: %ERRORLEVEL% > %ERRORFILE%
+    ECHO nmake %%a error level: %ERRORLEVEL% >> %ERRORFILE%
     ECHO %%a >> %ADDONS_FAILURE_FILE%
   ) ELSE (
     if %package% == true (
       nmake package-%%a
       IF ERRORLEVEL 1 (
-        ECHO nmake package-%%a error level: %ERRORLEVEL% > %ERRORFILE%
+        ECHO nmake package-%%a error level: %ERRORLEVEL% >> %ERRORFILE%
         ECHO %%a >> %ADDONS_FAILURE_FILE%
       ) ELSE (
         ECHO %%a >> %ADDONS_SUCCESS_FILE%
@@ -151,6 +152,11 @@ FOR %%a IN (%ADDONS_TO_MAKE%) DO (
       ECHO %%a >> %ADDONS_SUCCESS_FILE%
     )
   )
+)
+
+FOR %%F IN (%ADDONS_FAILURE_FILE%) DO IF %%~zF GTR 0 (
+  SET EXITCODE=1
+  ECHO Some addons failed to build. See %ADDONS_FAILURE_FILE%
 )
 
 rem everything was fine

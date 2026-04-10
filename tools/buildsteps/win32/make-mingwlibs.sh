@@ -51,13 +51,18 @@ checkfiles() {
 #start the process backgrounded
 runBackgroundProcess() {
   $TOUCH $BGPROCESSFILE
-  echo "backgrounding: bash $1 $BGPROCESSFILE $TOOLS & (workdir: $(PWD))"
+  echo "backgrounding: bash $1 $BGPROCESSFILE $TOOLS & (workdir: $PWD)"
   bash $1 $BGPROCESSFILE $targetBuild $TOOLS &
-  echo "waiting on bgprocess..."
+  local bgPID=$!
+  echo "waiting on bgprocess (PID $bgPID)..."
   while [ -f $BGPROCESSFILE ]; do
     echo -n "."
     sleep 5
   done
+  # Reap the background process and return its exit code so callers can
+  # detect failures immediately instead of continuing past a broken build.
+  wait $bgPID
+  return $?
 }
 
 
@@ -79,9 +84,15 @@ echo -ne "\033]0;building FFmpeg $BITS\007"
 echo "-------------------------------------------------"
 echo " building FFmpeg $BITS"
 echo "-------------------------------------------------"
-runBackgroundProcess "./buildffmpeg.sh $MAKECLEAN"
+runBackgroundProcess "./buildffmpeg.sh $MAKECLEAN" || exit 1
+# Check that all 7 expected FFmpeg DLLs are present (version-agnostic names)
 setfilepath /xbmc/system
-checkfiles avcodec-57.dll avformat-57.dll avutil-55.dll postproc-54.dll swscale-4.dll avfilter-6.dll swresample-2.dll
+for pattern in avcodec avformat avutil postproc swscale avfilter swresample; do
+  if ! ls "$FILEPATH/${pattern}-"*.dll 1>/dev/null 2>&1; then
+    throwerror "$FILEPATH/${pattern}-*.dll"
+    exit 1
+  fi
+done
 echo "-------------------------------------------------"
 echo " building of FFmpeg $BITS done..."
 echo "-------------------------------------------------"
@@ -90,7 +101,7 @@ echo -ne "\033]0;building libdvd $BITS\007"
 echo "-------------------------------------------------"
 echo " building libdvd $BITS"
 echo "-------------------------------------------------"
-runBackgroundProcess "./buildlibdvd.sh $MAKECLEAN"
+runBackgroundProcess "./buildlibdvd.sh $MAKECLEAN" || exit 1
 setfilepath /xbmc/system
 checkfiles libdvdcss-2.dll libdvdnav.dll
 echo "-------------------------------------------------"
@@ -141,8 +152,8 @@ else
   MAKECLEAN="noclean"
 fi
 
-if [ $NUMBER_OF_PROCESSORS > 1 ]; then
-  MAKEFLAGS=-j`expr $NUMBER_OF_PROCESSORS + $NUMBER_OF_PROCESSORS / 2`
+if [ "${NUMBER_OF_PROCESSORS:-0}" -gt 1 ]; then
+  MAKEFLAGS="-j$(( ${NUMBER_OF_PROCESSORS:-2} + ${NUMBER_OF_PROCESSORS:-2} / 2 ))"
 fi
 
 run_builds

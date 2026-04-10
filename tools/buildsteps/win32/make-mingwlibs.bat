@@ -25,7 +25,8 @@ FOR %%b in (%1, %2, %3) DO (
   IF %%b==msvc SET tools=msvc
 )
 rem set MSVC env
-call "%VS140COMNTOOLS%..\..\VC\vcvarsall.bat" %vcarch% || exit /b 1
+CALL "%~dp0find-vs.bat" || EXIT /B 1
+call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvarsall.bat" %vcarch% || exit /b 1
 
 IF "%WORKDIR%"=="" (
   SET WORKDIR=%~dp0\..\..\..
@@ -54,7 +55,7 @@ IF %opt%==sh (
 )
 IF EXIST %WORKDIR%\project\BuildDependencies\%msys2%\usr\bin\mintty.exe (
   ECHO starting mintty shell
-  %WORKDIR%\project\BuildDependencies\%msys2%\usr\bin\mintty.exe -d -i /msys2.ico /usr/bin/bash --login /xbmc/tools/buildsteps/win32/make-mingwlibs.sh --prompt=%PROMPTLEVEL% --mode=%BUILDMODE% --build32=%build32% --build64=%build64% --tools=%tools%
+  start /wait %WORKDIR%\project\BuildDependencies\%msys2%\usr\bin\mintty.exe -d -i /msys2.ico /usr/bin/bash --login /xbmc/tools/buildsteps/win32/make-mingwlibs.sh --prompt=%PROMPTLEVEL% --mode=%BUILDMODE% --build32=%build32% --build64=%build64% --tools=%tools%
   GOTO END
 )
 GOTO ENDWITHERROR

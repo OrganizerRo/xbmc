@@ -3,6 +3,10 @@
 [[ -f buildhelpers.sh ]] &&
     source buildhelpers.sh
 
+# Always remove the bgprocess sentinel on exit so runBackgroundProcess
+# doesn't loop forever if we exit early due to a build failure.
+trap 'rm -f "$BGPROCESSFILE"' EXIT
+
 FFMPEG_CONFIG_FILE=/xbmc/tools/buildsteps/win32/fmpeg_options.txt
 FFMPEG_VERSION_FILE=/xbmc/tools/depends/target/ffmpeg/FFMPEG-VERSION
 FFMPEG_BASE_OPTS="--disable-debug --disable-doc --enable-gpl --enable-gnutls --enable-w32threads"
@@ -98,6 +102,19 @@ if [[ "$tools" = "msvc" ]]; then
     VCTOOLSPATH="$VS140COMNTOOLS../../VC/BIN/"
   fi
 
+  if [[ -z "$VS140COMNTOOLS" ]]; then
+    # Try vswhere for VS 2017+
+    VSWHERE="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+    if [[ -f "$VSWHERE" ]]; then
+      VSINSTALLDIR=$("$VSWHERE" -latest -property installationPath | cygpath -u -)
+      if [[ $BITS = "64bit" ]]; then
+        VCTOOLSPATH="$VSINSTALLDIR/VC/Tools/MSVC/$(ls "$VSINSTALLDIR/VC/Tools/MSVC/" | tail -1)/bin/Hostx64/x64"
+      else
+        VCTOOLSPATH="$VSINSTALLDIR/VC/Tools/MSVC/$(ls "$VSINSTALLDIR/VC/Tools/MSVC/" | tail -1)/bin/Hostx86/x86"
+      fi
+    fi
+  fi
+
   export PATH="$VCTOOLSPATH":$PATH
   export CFLAGS=""
   export CXXFLAGS="" 
@@ -112,7 +129,7 @@ cd $LOCALBUILDDIR
 if do_checkForOptions "--enable-gnutls"; then
 if do_pkgConfig "gnutls = $GNUTLS_VER"; then
   if [[ ! -f "gnutls-${GNUTLS_VER}.tar.xz" ]]; then
-    do_wget "http://mirrors.xbmc.org/build-deps/sources/gnutls-${GNUTLS_VER}.tar.xz"
+    do_wget "https://mirrors.xbmc.org/build-deps/sources/gnutls-${GNUTLS_VER}.tar.xz"
   fi
   if [ -d "gnutls-${GNUTLS_VER}" ]; then
     rm -r "gnutls-${GNUTLS_VER}"
@@ -166,7 +183,3 @@ do_print_status "$LIBNAME-$VERSION (${BITS})" "$blue_color" "Configuring"
 do_makelib &&
 cp $FFMPEGDESTDIR/bin/*.dll /xbmc/system/
 
-#remove the bgprocessfile for signaling the process end
-if [ -f $BGPROCESSFILE ]; then
-  rm $BGPROCESSFILE
-fi
