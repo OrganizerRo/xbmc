@@ -1,4 +1,5 @@
 LIBNAME=libdvdcss
 BASE_URL=https://github.com/xbmc/libdvdcss
 VERSION=master
+# Pinned master SHA (update this when intentionally pulling new libdvdcss): 981488f7f27554b103cca10c1fbeba027396c94a
 

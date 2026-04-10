@@ -1,4 +1,5 @@
 LIBNAME=libdvdread
 BASE_URL=https://github.com/xbmc/libdvdread
 VERSION=master
+# Pinned master SHA (update this when intentionally pulling new libdvdread): 6f3f53a63549d937e75c0db132fb1bce6b71a496
 

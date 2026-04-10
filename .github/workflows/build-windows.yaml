@@ -12,7 +12,7 @@ on:
 jobs:
   build-kodi:
     name: Build Kodi (Windows x86)
-    runs-on: windows-2019
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
@@ -34,6 +34,8 @@ jobs:
                                         'tools/depends/target/libdvdcss/DVDCSS-VERSION',
                                         'tools/depends/target/libdvdread/DVDREAD-VERSION',
                                         'tools/depends/target/libdvdnav/DVDNAV-VERSION',
+                                        'tools/buildsteps/win32/make-mingwlibs.sh',
+                                        'tools/buildsteps/win32/buildhelpers.sh',
                                         'tools/buildsteps/win32/buildffmpeg.sh',
                                         'tools/buildsteps/win32/buildlibdvd.sh',
                                         'tools/buildsteps/win32/fmpeg_options.txt') }}
@@ -109,6 +111,30 @@ jobs:
           --build32=yes
           --build64=no
 
+      # Validate that the MinGW build produced expected output directories and
+      # files before the cache is written.  Catches silent build failures early
+      # with a clear error message instead of a cryptic CMake "cannot find"
+      # error on the next cache hit.
+      - name: Validate MinGW build outputs
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $required = @(
+            "lib\win32\ffmpeg\lib",
+            "lib\win32\ffmpeg\include",
+            "lib\libdvd\lib",
+            "lib\libdvd\include"
+          )
+          $failed = $false
+          foreach ($rel in $required) {
+            $path = "$env:GITHUB_WORKSPACE\$rel"
+            if (-not (Test-Path $path) -or (Get-ChildItem $path).Count -eq 0) {
+              Write-Error "Missing or empty: $path"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
       # MinGW produces lib*.dll.a import libs; MSVC needs *.lib names.
       # Strip the "lib" prefix and replace ".dll.a" with ".lib".
       - name: Rename MinGW FFmpeg import libs for MSVC
@@ -117,7 +143,12 @@ jobs:
         run: |
           $libDir = "$env:GITHUB_WORKSPACE\lib\win32\ffmpeg\lib"
           if (Test-Path $libDir) {
-            Get-ChildItem -Path $libDir -Filter "lib*.dll.a" | ForEach-Object {
+            $files = Get-ChildItem -Path $libDir -Filter "lib*.dll.a"
+            if ($files.Count -eq 0) {
+              Write-Error "No lib*.dll.a import libraries found in $libDir — FFmpeg build likely failed or output went to wrong location"
+              exit 1
+            }
+            $files | ForEach-Object {
               $newName = $_.Name.Substring(3) -replace '\.dll\.a$', '.lib'
               Rename-Item $_.FullName (Join-Path $_.DirectoryName $newName)
             }
@@ -151,7 +182,7 @@ jobs:
         run: |
           mkdir kodi-build
           cd kodi-build
-          cmake -G "Visual Studio 16 2019" -A Win32 ..\project\cmake
+          cmake -G "Visual Studio 17 2022" -A Win32 ..\project\cmake
 
       - name: Build
         shell: cmd

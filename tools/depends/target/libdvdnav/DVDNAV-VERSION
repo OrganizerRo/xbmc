@@ -1,4 +1,5 @@
 LIBNAME=libdvdnav
 BASE_URL=https://github.com/xbmc/libdvdnav
 VERSION=master
+# Pinned master SHA (update this when intentionally pulling new libdvdnav): 2f12236bc1c92f73c21e973363f79eb300de603f
 
