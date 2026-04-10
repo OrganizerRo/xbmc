@@ -131,6 +131,10 @@ if [[ "$tools" = "msvc" ]]; then
 fi
 
 [[ -z "$LOCALBUILDDIR" ]] && { echo "ERROR: LOCALBUILDDIR not set"; exit 1; }
+
+# Ensure pkg-config can find libraries installed to LOCALDESTDIR (e.g. gnutls)
+export PKG_CONFIG_PATH="$LOCALDESTDIR/lib/pkgconfig:$LOCALDESTDIR/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
 cd $LOCALBUILDDIR
 
 if do_checkForOptions "--enable-gnutls"; then
