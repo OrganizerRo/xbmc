@@ -27,7 +27,7 @@ rem run doxygen
 "%bin_dir%\doxygen\doxygen.exe" > NUL 2>&1
 
 rem run swig to generate the XML used by groovy to generate the python bindings
-"%bin_dir%\swig\swig.exe" -w401 -c++ -outdir "%python_generated_dir%" -o "%python_generated_dir%\%2.xml" -xml -I"%base_Dir%\xbmc" -xmllang python "%swig_dir%\%2.i"
+"%bin_dir%\swig\swig.exe" -w401 -c++ -outdir "%python_generated_dir%" -o "%python_generated_dir%\%2.xml" -xml -python -I"%base_Dir%\xbmc" "%swig_dir%\%2.i"
 rem run groovy to generate the python bindings
 "%java_exe%" -cp "%groovy_dir%\groovy-all-2.4.4.jar;%groovy_dir%\commons-lang-2.6.jar;%generator_dir%;%python_dir%" groovy.ui.GroovyMain "%generator_dir%\Generator.groovy" "%python_generated_dir%\%2.xml" "%python_dir%\PythonSwig.cpp.template" "%python_generated_dir%\%2.cpp" "%doxygen_dir%"
 

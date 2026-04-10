@@ -200,11 +200,15 @@ jobs:
 
       - name: Bootstrap addons
         shell: cmd
+        env:
+          vcarch: x86
         run: call tools\buildsteps\win32\bootstrap-addons.bat
 
       - name: Build addons
         continue-on-error: true
         shell: cmd
+        env:
+          vcarch: x86
         run: call tools\buildsteps\win32\make-addons.bat
 
       # ---------------------------------------------------------------
