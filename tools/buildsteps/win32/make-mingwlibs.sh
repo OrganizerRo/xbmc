@@ -51,8 +51,8 @@ checkfiles() {
 #start the process backgrounded
 runBackgroundProcess() {
   $TOUCH $BGPROCESSFILE
-  echo "backgrounding: sh $1 $BGPROCESSFILE $TOOLS & (workdir: $(PWD))"
-  sh $1 $BGPROCESSFILE $targetBuild $TOOLS &
+  echo "backgrounding: bash $1 $BGPROCESSFILE $TOOLS & (workdir: $(PWD))"
+  bash $1 $BGPROCESSFILE $targetBuild $TOOLS &
   echo "waiting on bgprocess..."
   while [ -f $BGPROCESSFILE ]; do
     echo -n "."
