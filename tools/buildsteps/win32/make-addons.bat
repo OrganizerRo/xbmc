@@ -21,21 +21,20 @@ FOR %%b IN (%*) DO (
     SET addon=!addon! %%b
   )))
 )
-SETLOCAL DisableDelayedExpansion
+ENDLOCAL & SET "addon=%addon%" & SET "install=%install%" & SET "clean=%clean%" & SET "package=%package%"
 
 rem set Visual C++ build environment
 CALL "%~dp0find-vs.bat" || EXIT /B 1
+IF "%vcarch%"=="" SET vcarch=x64
 call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvarsall.bat" %vcarch% || exit /b 1
 
-SET WORKDIR=%base_dir%
+SET WORKDIR=%WORKSPACE%
 
 IF "%WORKDIR%" == "" (
   rem resolve the relative path
-  SETLOCAL EnableDelayedExpansion
   PUSHD ..\..\..
-  SET WORKDIR=!CD!
+  SET WORKDIR=%CD%
   POPD
-  SETLOCAL DisableDelayedExpansion
 )
 
 rem setup some paths that we need later
@@ -83,7 +82,7 @@ CD "%ADDONS_BUILD_PATH%"
 
 rem determine the proper install path for the built addons
 IF %install% == true (
-  SET ADDONS_INSTALL_PATH=%WORKSPACE%\addons
+  SET ADDONS_INSTALL_PATH=%WORKDIR%\addons
 ) ELSE (
   SET ADDONS_INSTALL_PATH=%WORKDIR%\project\Win32BuildSetup\BUILD_WIN32\addons
 )
@@ -100,7 +99,7 @@ IF "%addon%" NEQ "" (
   FOR /D %%a IN (%ADDONS_DEFINITION_PATH%\*) DO (
     SET ADDONS_TO_BUILD=!ADDONS_TO_BUILD! %%~nxa
   )
-  SETLOCAL DisableDelayedExpansion
+  ENDLOCAL & SET "ADDONS_TO_BUILD=%ADDONS_TO_BUILD%"
 )
 
 rem execute cmake to generate makefiles processable by nmake
@@ -115,7 +114,7 @@ cmake "%ADDONS_PATH%" -G "NMake Makefiles" ^
       -DPACKAGE_ZIP=ON ^
       -DADDONS_TO_BUILD="%ADDONS_TO_BUILD%"
 IF ERRORLEVEL 1 (
-  ECHO cmake error level: %ERRORLEVEL% > %ERRORFILE%
+  ECHO cmake failed >> %ERRORFILE%
   GOTO ERROR
 )
 
@@ -129,7 +128,7 @@ FOR /f "delims=" %%i IN ('nmake supported_addons') DO (
     SET ADDONS_TO_MAKE=!addons:~3,-1!
   )
 )
-SETLOCAL DisableDelayedExpansion
+ENDLOCAL & SET "ADDONS_TO_MAKE=%ADDONS_TO_MAKE%"
 
 rem loop over all addons to build
 FOR %%a IN (%ADDONS_TO_MAKE%) DO (

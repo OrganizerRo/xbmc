@@ -19,17 +19,16 @@ if "%1" == "clean" (
 
 rem set Visual C++ build environment
 CALL "%~dp0find-vs.bat" || EXIT /B 1
-call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvarsall.bat" x86 || exit /b 1
+IF "%vcarch%"=="" SET vcarch=x64
+call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvarsall.bat" %vcarch% || exit /b 1
 
 SET WORKDIR=%WORKSPACE%
 
 IF "%WORKDIR%" == "" (
   rem resolve the relative path
-  SETLOCAL EnableDelayedExpansion
   PUSHD ..\..\..
-  SET WORKDIR=!CD!
+  SET WORKDIR=%CD%
   POPD
-  SETLOCAL DisableDelayedExpansion
 )
 
 rem setup some paths that we need later
@@ -77,14 +76,14 @@ cmake "%ADDONS_BOOTSTRAP_PATH%" -G "NMake Makefiles" ^
       -DREPOSITORY_TO_BUILD="%REPOSITORY%" ^
       -DREPOSITORY_REVISION="%REPOSITORY_REVISION%"
 IF ERRORLEVEL 1 (
-  ECHO cmake error level: %ERRORLEVEL%
+  ECHO cmake failed
   GOTO ERROR
 )
 
 rem execute nmake to prepare the buildsystem
 nmake
 IF ERRORLEVEL 1 (
-  ECHO nmake failed with error level: %ERRORLEVEL%
+  ECHO nmake failed
   GOTO ERROR
 )
 rem everything was fine

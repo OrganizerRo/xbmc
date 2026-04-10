@@ -6,7 +6,11 @@ MAKECLEANFILE=$Win32BuildSetup/makeclean
 BGPROCESSFILE=$Win32BuildSetup/bgprocess
 TOUCH=/bin/touch
 RM=/bin/rm
-NOPROMPT=0
+if [[ -n "$CI" || -n "$GITHUB_ACTIONS" ]]; then
+  NOPROMPT=1
+else
+  NOPROMPT=0
+fi
 MAKECLEAN=""
 MAKEFLAGS=""
 TOOLS="mingw"
@@ -29,8 +33,8 @@ done
 
 throwerror() {
   $TOUCH $ERRORFILE
-  echo failed to compile $1
-  if [ $NOPROMPT == 0 ]; then
+  echo "failed to compile $1"
+  if [[ "$NOPROMPT" == "0" ]]; then
 	read
   fi
 }
@@ -40,7 +44,7 @@ setfilepath() {
 }
 
 checkfiles() {
-  for i in $@; do
+  for i in "$@"; do
     if [ ! -f "$FILEPATH/$i" ]; then
       throwerror "$FILEPATH/$i"
       exit 1
@@ -103,7 +107,13 @@ echo " building libdvd $BITS"
 echo "-------------------------------------------------"
 runBackgroundProcess "./buildlibdvd.sh $MAKECLEAN" || exit 1
 setfilepath /xbmc/system
-checkfiles libdvdcss-2.dll libdvdnav.dll
+for pattern in libdvdcss libdvdnav; do
+  if ! ls "$FILEPATH/${pattern}"*.dll 1>/dev/null 2>&1 && \
+     ! ls "$FILEPATH/${pattern}-"*.dll 1>/dev/null 2>&1; then
+    throwerror "$FILEPATH/${pattern}*.dll"
+    exit 1
+  fi
+done
 echo "-------------------------------------------------"
 echo " building of libdvd $BITS done..."
 echo "-------------------------------------------------"
@@ -120,6 +130,10 @@ run_builds() {
     new_updates="no"
     new_updates_packages=""
     if [[ $build32 = "yes" ]]; then
+        if [[ ! -f /local32/etc/profile.local ]]; then
+            echo "ERROR: /local32/etc/profile.local not found. Run prepare-env first."
+            exit 1
+        fi
         source /local32/etc/profile.local
         buildProcess
         echo "-------------------------------------------------------------------------------"
@@ -128,6 +142,10 @@ run_builds() {
     fi
 
     if [[ $build64 = "yes" ]]; then
+        if [[ ! -f /local64/etc/profile.local ]]; then
+            echo "ERROR: /local64/etc/profile.local not found. Run prepare-env first."
+            exit 1
+        fi
         source /local64/etc/profile.local
         buildProcess
         echo "-------------------------------------------------------------------------------"
@@ -162,7 +180,7 @@ echo -e "\033]0;compiling done...\007"
 echo
 
 # wait for key press
-if [ $NOPROMPT == 0 ]; then
-  echo press a key to close the window
+if [[ "$NOPROMPT" == "0" ]]; then
+  echo "press a key to close the window"
   read
 fi

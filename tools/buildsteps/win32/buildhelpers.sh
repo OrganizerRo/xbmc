@@ -9,7 +9,7 @@ if [ "${NUMBER_OF_PROCESSORS:-0}" -gt 1 ]; then
   if [ "${NUMBER_OF_PROCESSORS:-0}" -gt 4 ]; then
     cpuCount=6
   else
-    cpuCount=`expr $NUMBER_OF_PROCESSORS + $NUMBER_OF_PROCESSORS / 2`
+    cpuCount="$(( NUMBER_OF_PROCESSORS + NUMBER_OF_PROCESSORS / 2 ))"
   fi
 fi
 if [[ ! $cpuCount =~ ^[0-9]+$ ]]; then
@@ -42,7 +42,7 @@ do_wget() {
 
 do_makeinstall() {
   make -j"$cpuCount" "$@" || return 1
-  make install
+  make install || return 1
 }
 
 do_makelib() {
@@ -82,7 +82,7 @@ do_pkgConfig() {
   [[ -z "$version" ]] && version="${1##*= }"
   [[ "$version" = "$1" ]] && version="" || version=" $version"
   local prefix=$(pkg-config --variable=prefix --silence-errors "$1")
-  [[ ! -z "$prefix" ]] && prefix="$(cygpath -u "$prefix")"
+  [[ ! -z "$prefix" ]] && prefix="$(cygpath -u "$prefix" 2>/dev/null || echo "$prefix" | sed 's|\\|/|g; s|^\([A-Za-z]\):|/\L\1|')"
   if [[ "$prefix" = "$LOCALDESTDIR" || "$prefix" = "/trunk${LOCALDESTDIR}" ]]; then
     do_print_status "${pkg} ${version}" "$green_color" "Up-to-date"
     return 1
@@ -104,7 +104,7 @@ get_last_version() {
 }
 
 do_autoreconf() {
-  if [[ ! -f configure ]]; then 
+  if [[ ! -f configure || configure.ac -nt configure ]]; then
     autoreconf -fiv
   fi
 }
@@ -126,7 +126,7 @@ do_download() {
     fi
 
     do_print_status "$ARCHIVE" "$blue_color" "Extracting"
-    mkdir $LIBNAME && cd $LIBNAME
+    mkdir -p "$LIBNAME" && cd "$LIBNAME"
     tar -xaf ../$ARCHIVE --strip 1
   else
     cd $LIBNAME
@@ -139,7 +139,7 @@ do_loaddeps() {
   BASE_URL=$(grep "BASE_URL=" $file | sed 's/BASE_URL=//g;s/#.*$//g;/^$/d')
   VERSION=$(grep "VERSION=" $file | sed 's/VERSION=//g;s/#.*$//g;/^$/d')
   GNUTLS_VER=$(grep "GNUTLS_VER=" $file | sed 's/GNUTLS_VER=//g;s/#.*$//g;/^$/d')
-  GITREV=$(git ls-remote $BASE_URL $VERSION | awk '{print $1}')
+  GITREV=$(git ls-remote "$BASE_URL" "$VERSION" 2>/dev/null | awk '{print $1}')
   if [[ -z "$GITREV" ]]; then
     ARCHIVE=$LIBNAME-$(echo "${VERSION}" | sed 's/\//-/g').tar.gz
   else
@@ -149,7 +149,11 @@ do_loaddeps() {
 }
 
 do_clean_get() {
-  cd "$LOCALBUILDDIR"
+  if [[ -z "$LOCALBUILDDIR" ]]; then
+    echo "ERROR: LOCALBUILDDIR is not set"
+    return 1
+  fi
+  cd "$LOCALBUILDDIR" || return 1
   do_clean $1
   do_download
 }

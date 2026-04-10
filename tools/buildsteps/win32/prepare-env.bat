@@ -12,6 +12,7 @@ rem git clean the untracked files and directories
 rem but keep the downloaded dependencies
 ECHO running git clean -xfd -e "project/BuildDependencies/downloads" -e "project/BuildDependencies/downloads2"
 git clean -xfd -e "project/BuildDependencies/downloads" -e "project/BuildDependencies/downloads2"
+IF %ERRORLEVEL% NEQ 0 (ECHO ERROR: git clean failed & EXIT /B 1)
 
 rem cleaning additional directories
 ECHO delete build directories
@@ -21,3 +22,5 @@ IF EXIST %WORKSPACE%\project\BuildDependencies\include rmdir %WORKSPACE%\project
 IF EXIST %WORKSPACE%\project\BuildDependencies\lib rmdir %WORKSPACE%\project\BuildDependencies\lib /S /Q
 IF EXIST %WORKSPACE%\project\BuildDependencies\msys rmdir %WORKSPACE%\project\BuildDependencies\msys /S /Q
 IF EXIST %WORKSPACE%\project\BuildDependencies\msys64 rmdir %WORKSPACE%\project\BuildDependencies\msys64 /S /Q
+
+EXIT /B 0

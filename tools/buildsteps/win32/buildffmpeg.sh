@@ -96,23 +96,29 @@ if [[ "$tools" = "msvc" ]]; then
   # set path to MS cl.exe and link.exe first
   if [[ $BITS = "64bit" ]]; then
     FFMPEG_TARGET_OS=win64
-    VCTOOLSPATH="$VS140COMNTOOLS../../VC/BIN/amd64"
   else
     FFMPEG_TARGET_OS=win32
-    VCTOOLSPATH="$VS140COMNTOOLS../../VC/BIN/"
   fi
 
-  if [[ -z "$VS140COMNTOOLS" ]]; then
-    # Try vswhere for VS 2017+
-    VSWHERE="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
-    if [[ -f "$VSWHERE" ]]; then
-      VSINSTALLDIR=$("$VSWHERE" -latest -property installationPath | cygpath -u -)
-      if [[ $BITS = "64bit" ]]; then
-        VCTOOLSPATH="$VSINSTALLDIR/VC/Tools/MSVC/$(ls "$VSINSTALLDIR/VC/Tools/MSVC/" | tail -1)/bin/Hostx64/x64"
-      else
-        VCTOOLSPATH="$VSINSTALLDIR/VC/Tools/MSVC/$(ls "$VSINSTALLDIR/VC/Tools/MSVC/" | tail -1)/bin/Hostx86/x86"
-      fi
+  # Try vswhere for VS 2017+ first (GitHub runners have VS 2019/2022)
+  VSWHERE="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+  if [[ -f "$VSWHERE" ]]; then
+    VSINSTALLDIR=$("$VSWHERE" -latest -property installationPath | cygpath -u -)
+    if [[ $BITS = "64bit" ]]; then
+      VCTOOLSPATH="$VSINSTALLDIR/VC/Tools/MSVC/$(ls "$VSINSTALLDIR/VC/Tools/MSVC/" | tail -1)/bin/Hostx64/x64"
+    else
+      VCTOOLSPATH="$VSINSTALLDIR/VC/Tools/MSVC/$(ls "$VSINSTALLDIR/VC/Tools/MSVC/" | tail -1)/bin/Hostx86/x86"
     fi
+  elif [[ -n "$VS140COMNTOOLS" ]]; then
+    # Fallback for VS 2015 (legacy)
+    if [[ $BITS = "64bit" ]]; then
+      VCTOOLSPATH="$VS140COMNTOOLS../../VC/BIN/amd64"
+    else
+      VCTOOLSPATH="$VS140COMNTOOLS../../VC/BIN/"
+    fi
+  else
+    echo "ERROR: Cannot find Visual Studio installation (no vswhere.exe and VS140COMNTOOLS not set)"
+    exit 1
   fi
 
   export PATH="$VCTOOLSPATH":$PATH
@@ -124,6 +130,7 @@ if [[ "$tools" = "msvc" ]]; then
   extra_ldflags="-LIBPATH:\"$LOCALDESTDIR/lib\" -LIBPATH:\"$MINGW_PREFIX/lib\" /NODEFAULTLIB:libcmt"
 fi
 
+[[ -z "$LOCALBUILDDIR" ]] && { echo "ERROR: LOCALBUILDDIR not set"; exit 1; }
 cd $LOCALBUILDDIR
 
 if do_checkForOptions "--enable-gnutls"; then
@@ -160,7 +167,7 @@ if do_pkgConfig "gnutls = $GNUTLS_VER"; then
   ./configure --prefix=$LOCALDESTDIR --disable-shared --build="$MINGW_CHOST" --disable-cxx \
       --disable-doc --disable-tools --disable-tests --without-p11-kit --disable-rpath \
       --disable-libdane --without-idn --without-tpm --enable-local-libopts --disable-guile \
-      --disable-hardware-acceleration
+      --disable-hardware-acceleration || exit 1
   sed -i 's/-lgnutls *$/-lgnutls -lnettle -lhogweed -lcrypt32 -lws2_32 -lz -lgmp -lintl -liconv/' \
   lib/gnutls.pc
   do_print_status "gnutls-${GNUTLS_VER}" "$blue_color" "Compiling"
@@ -178,8 +185,9 @@ do_print_status "$LIBNAME-$VERSION (${BITS})" "$blue_color" "Configuring"
 
 ./configure --target-os=$FFMPEG_TARGET_OS --prefix=$FFMPEGDESTDIR --arch=$arch \
   --disable-static --enable-shared $FFMPEG_OPTS_SHARED \
-  --extra-cflags="$extra_cflags" --extra-ldflags="$extra_ldflags"
+  --extra-cflags="$extra_cflags" --extra-ldflags="$extra_ldflags" || exit 1
 
-do_makelib &&
-cp $FFMPEGDESTDIR/bin/*.dll /xbmc/system/
+do_makelib || exit 1
+[[ -d /xbmc/system/ ]] || { echo "ERROR: /xbmc/system/ not found — ensure MSYS2 fstab is configured and Kodi source is checked out"; exit 1; }
+cp $FFMPEGDESTDIR/bin/*.dll /xbmc/system/ || exit 1
 

@@ -7,11 +7,12 @@
 # doesn't loop forever if we exit early due to a build failure.
 trap 'rm -f "$BGPROCESSFILE"' EXIT
 
-[[ -z "$LIBDVDPREFIX" ]] && { echo "ERROR: LIBDVDPREFIX is not set"; exit 1; }
+[[ -z "$LOCALBUILDDIR" ]] && { echo "ERROR: LOCALBUILDDIR is not set"; exit 1; }
 
 MAKEFLAGS="${MAKEFLAGS:--j$(( $(nproc) / 2 + 1 ))}"
 
-LIBDVDPREFIX=/xbmc/lib/libdvd
+# Default prefix for all libdvd artifacts. Override via LIBDVDPREFIX env var if needed.
+LIBDVDPREFIX="${LIBDVDPREFIX:-/xbmc/lib/libdvd}"
 PKG_CONFIG_PATH=$LIBDVDPREFIX/lib/pkgconfig:$LIBDVDPREFIX/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
 export PKG_CONFIG_PATH
 
@@ -20,13 +21,13 @@ mkdir -p "$LIBDVDPREFIX/bin" "$LIBDVDPREFIX/lib/pkgconfig" "$LIBDVDPREFIX/includ
 
 do_load_autoconf() {
   do_loaddeps $1
-  do_clean_get $MAKEFLAGS
+  do_clean_get "noclean"
   do_print_status "$LIBNAME-$VERSION (${BITS})" "$blue_color" "Configuring"
   do_autoreconf
 }
 
 #libdvdcss
-do_load_autoconf /xbmc/tools/depends/target/libdvdcss/DVDCSS-VERSION
+do_load_autoconf "${KODI_ROOT:-/xbmc}/tools/depends/target/libdvdcss/DVDCSS-VERSION"
 ac_cv_path_GIT= ./configure \
       --prefix=$LIBDVDPREFIX \
       CC="gcc -static-libgcc" \
@@ -45,10 +46,10 @@ touch ChangeLog
 do_makelib $MAKEFLAGS || exit 1
 
 strip -S $LIBDVDPREFIX/bin/libdvdcss-2.dll &&
-cp "$LIBDVDPREFIX/bin/libdvdcss-2.dll" /xbmc/system/
+cp "$LIBDVDPREFIX/bin/libdvdcss-2.dll" /xbmc/system/ || exit 1
 
 #libdvdread
-do_load_autoconf /xbmc/tools/depends/target/libdvdread/DVDREAD-VERSION
+do_load_autoconf "${KODI_ROOT:-/xbmc}/tools/depends/target/libdvdread/DVDREAD-VERSION"
 ./configure \
     --prefix=$LIBDVDPREFIX \
    --disable-shared \
@@ -62,7 +63,7 @@ do_load_autoconf /xbmc/tools/depends/target/libdvdread/DVDREAD-VERSION
 do_makelib $MAKEFLAGS || exit 1
 
 #libdvdnav
-do_load_autoconf /xbmc/tools/depends/target/libdvdnav/DVDNAV-VERSION
+do_load_autoconf "${KODI_ROOT:-/xbmc}/tools/depends/target/libdvdnav/DVDNAV-VERSION"
 ./configure \
    --prefix=$LIBDVDPREFIX \
    --disable-shared \
@@ -92,8 +93,8 @@ gcc \
    libdvdread/src/*.o libdvdnav/src/*.o libdvdnav/src/vm/*.o $LIBDVDPREFIX/lib/libdvdcss.dll.a \
    -Wl,--enable-auto-image-base \
    -Xlinker --enable-auto-import \
-   -static-libgcc
+   -static-libgcc || exit 1
 
 strip -S $LIBDVDPREFIX/bin/libdvdnav.dll &&
-cp $LIBDVDPREFIX/bin/libdvdnav.dll /xbmc/system/
+cp $LIBDVDPREFIX/bin/libdvdnav.dll /xbmc/system/ || exit 1
 do_print_status "libdvd (${BITS})" "$green_color" "Done"
