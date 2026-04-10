@@ -127,6 +127,13 @@ if do_pkgConfig "gnutls = $GNUTLS_VER"; then
   sed -i 's/return &nettle_secp_384r1;/return nettle_get_secp_384r1();/g' lib/nettle/pk.c
   sed -i 's/return &nettle_secp_521r1;/return nettle_get_secp_521r1();/g' lib/nettle/pk.c
 
+  # Fix system-keys-win.c for newer GCC: NCRYPT_KEY_HANDLE/NCRYPT_PROV_HANDLE
+  # are ULONG_PTR (integer types), not pointers — NULL causes -Wint-conversion errors
+  sed -i 's/NCRYPT_KEY_HANDLE nc = NULL;/NCRYPT_KEY_HANDLE nc = 0;/' lib/system-keys-win.c
+  sed -i 's/NCRYPT_PROV_HANDLE sctx = NULL;/NCRYPT_PROV_HANDLE sctx = 0;/' lib/system-keys-win.c
+  # Fix const qualifier discard: tmp.data is unsigned char*, p is const char*
+  sed -i 's/tmp\.data = p;/tmp.data = (unsigned char *)p;/' lib/system-keys-win.c
+
   do_print_status "gnutls-${GNUTLS_VER}" "$blue_color" "Configuring"
 
   rm -rf $LOCALDESTDIR/include/gnutls
