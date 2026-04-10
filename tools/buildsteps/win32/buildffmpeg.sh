@@ -28,6 +28,7 @@ do_getFFmpegConfig() {
     arch=x86
     FFMPEG_TARGET_OS=mingw32
     do_addOption "--cpu=i686"
+    do_addOption "--disable-inline-asm"
   fi
   export arch
 
@@ -118,6 +119,13 @@ if do_pkgConfig "gnutls = $GNUTLS_VER"; then
   fi
   tar -xaf "gnutls-${GNUTLS_VER}.tar.xz"
   cd "gnutls-${GNUTLS_VER}"
+
+  # Fix nettle 3.4+ API: struct variables replaced by getter functions
+  sed -i 's/return &nettle_secp_192r1;/return nettle_get_secp_192r1();/g' lib/nettle/pk.c
+  sed -i 's/return &nettle_secp_224r1;/return nettle_get_secp_224r1();/g' lib/nettle/pk.c
+  sed -i 's/return &nettle_secp_256r1;/return nettle_get_secp_256r1();/g' lib/nettle/pk.c
+  sed -i 's/return &nettle_secp_384r1;/return nettle_get_secp_384r1();/g' lib/nettle/pk.c
+  sed -i 's/return &nettle_secp_521r1;/return nettle_get_secp_521r1();/g' lib/nettle/pk.c
 
   do_print_status "gnutls-${GNUTLS_VER}" "$blue_color" "Configuring"
 

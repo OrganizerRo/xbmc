@@ -41,14 +41,18 @@ do_wget() {
 }
 
 do_makeinstall() {
-  make -j"$cpuCount" "$@"
+  make -j"$cpuCount" "$@" || return 1
   make install
 }
 
 do_makelib() {
   do_print_status "$LIBNAME-$VERSION (${BITS})" "$blue_color" "Compiling"
-  do_makeinstall $1
-  do_print_status "$LIBNAME-$VERSION (${BITS})" "$green_color" "Done"
+  if do_makeinstall $1; then
+    do_print_status "$LIBNAME-$VERSION (${BITS})" "$green_color" "Done"
+  else
+    do_print_status "$LIBNAME-$VERSION (${BITS})" "$red_color" "Failed"
+    return 1
+  fi
 }
 
 do_print_status() {
