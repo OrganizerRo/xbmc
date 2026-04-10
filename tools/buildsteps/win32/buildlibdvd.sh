@@ -89,7 +89,6 @@ gcc \
    -shared \
    -o $LIBDVDPREFIX/bin/libdvdnav.dll \
    -Wl,--out-implib,$LIBDVDPREFIX/lib/libdvdnav.dll.a \
-   -ldl \
    libdvdread/src/*.o libdvdnav/src/*.o libdvdnav/src/vm/*.o $LIBDVDPREFIX/lib/libdvdcss.dll.a \
    -Wl,--enable-auto-image-base \
    -Xlinker --enable-auto-import \
