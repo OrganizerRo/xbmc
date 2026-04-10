@@ -68,6 +68,9 @@ public:
   bool         scaleDiffuse;
 };
 
+class CVideoBackgroundDecoder;
+class CTexture;
+
 class CTextureInfo
 {
 public:
@@ -172,6 +175,9 @@ protected:
 
   CTextureArray m_diffuse;
   CTextureArray m_texture;
+
+  CVideoBackgroundDecoder* m_videoDecoder;
+  CTexture*                m_videoTexture;
 };
 
 

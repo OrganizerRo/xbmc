@@ -342,6 +342,28 @@ const CTextureArray& CGUITextureManager::Load(const std::string& strTextureName,
   start = CurrentHostCounter();
 #endif
 
+  // Video background support: detect video file extensions and create a
+  // streaming-decoder placeholder rather than pre-loading frames.
+  static const std::vector<std::string> s_videoExts = {
+    ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v", ".ts", ".webm"
+  };
+  bool isVideoBackground = false;
+  for (const auto& ext : s_videoExts)
+  {
+    if (StringUtils::EndsWithNoCase(strPath, ext))
+    {
+      isVideoBackground = true;
+      break;
+    }
+  }
+  if (isVideoBackground)
+  {
+    CTextureMap* pMap = new CTextureMap(strTextureName, 0, 0, 0);
+    pMap->SetVideoPath(strPath);
+    m_vecTextures.push_back(pMap);
+    return pMap->GetTexture();
+  }
+
   if (bundle >= 0 && StringUtils::EndsWithNoCase(strPath, ".gif"))
   {
     CTextureMap* pMap = nullptr;

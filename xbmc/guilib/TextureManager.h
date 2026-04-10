@@ -85,11 +85,16 @@ public:
   bool IsEmpty() const;
   void SetHeight(int height);
   void SetWidth(int height);
+
+  void SetVideoPath(const std::string& p) { m_videoPath = p; }
+  const std::string& GetVideoPath() const { return m_videoPath; }
+  bool IsVideo() const { return !m_videoPath.empty(); }
 protected:
   void FreeTexture();
 
   CTextureArray m_texture;
   std::string m_textureName;
+  std::string m_videoPath;
   unsigned int m_referenceCount;
   uint32_t m_memUsage;
 };

@@ -22,6 +22,8 @@
 #include "GraphicContext.h"
 #include "TextureManager.h"
 #include "GUILargeTextureManager.h"
+#include "Texture.h"
+#include "VideoBackgroundDecoder.h"
 #include "utils/MathUtils.h"
 #include "utils/StringUtils.h"
 
@@ -50,7 +52,9 @@ CTextureInfo& CTextureInfo::operator=(const CTextureInfo &right)
 }
 
 CGUITextureBase::CGUITextureBase(float posX, float posY, float width, float height, const CTextureInfo& texture) :
-  m_height(height), m_info(texture)
+  m_height(height), m_info(texture),
+  m_videoDecoder(nullptr),
+  m_videoTexture(nullptr)
 {
   m_posX = posX;
   m_posY = posY;
@@ -86,7 +90,9 @@ CGUITextureBase::CGUITextureBase(const CGUITextureBase &right) :
   m_height(right.m_height),
   m_alpha(right.m_alpha),
   m_info(right.m_info),
-  m_aspect(right.m_aspect)
+  m_aspect(right.m_aspect),
+  m_videoDecoder(nullptr),
+  m_videoTexture(nullptr)
 {
   m_posX = right.m_posX;
   m_posY = right.m_posY;
@@ -119,6 +125,10 @@ CGUITextureBase::CGUITextureBase(const CGUITextureBase &right) :
 
 CGUITextureBase::~CGUITextureBase(void)
 {
+  delete m_videoDecoder;
+  m_videoDecoder = nullptr;
+  delete m_videoTexture;
+  m_videoTexture = nullptr;
 }
 
 bool CGUITextureBase::AllocateOnDemand()
@@ -145,7 +155,7 @@ bool CGUITextureBase::Process(unsigned int currentTime)
   // check if we need to allocate our resources
   changed |= AllocateOnDemand();
 
-  if (m_texture.size() > 1)
+  if (m_videoDecoder || m_texture.size() > 1)
     changed |= UpdateAnimFrame(currentTime);
 
   if (m_invalid)
@@ -158,6 +168,14 @@ void CGUITextureBase::Render()
 {
   if (!m_visible || !m_texture.size())
     return;
+
+  // Swap in video texture for rendering if available
+  CBaseTexture* originalTexture = nullptr;
+  if (m_videoDecoder && m_videoTexture && m_currentFrame < m_texture.m_textures.size())
+  {
+    originalTexture = m_texture.m_textures[m_currentFrame];
+    m_texture.m_textures[m_currentFrame] = m_videoTexture;
+  }
 
   // see if we need to clip the image
   if (m_vertex.Width() > m_width || m_vertex.Height() > m_height)
@@ -229,6 +247,10 @@ void CGUITextureBase::Render()
 
   // close off our renderer
   End();
+
+  // Restore original texture after video render
+  if (originalTexture && m_currentFrame < m_texture.m_textures.size())
+    m_texture.m_textures[m_currentFrame] = originalTexture;
 
   if (m_vertex.Width() > m_width || m_vertex.Height() > m_height)
     g_graphicsContext.RestoreClipRegion();
@@ -331,13 +353,73 @@ bool CGUITextureBase::AllocResources()
     // set allocated to true even if we couldn't load the image to save
     // us hitting the disk every frame
     m_isAllocated = texture.size() ? NORMAL : NORMAL_FAILED;
-    if (!texture.size())
-      return false;
     m_texture = texture;
-    changed = true;
+    if (!texture.size())
+    {
+      // For video backgrounds, TextureManager returns an empty CTextureArray.
+      // Don't bail out yet — the video decoder init below will set up rendering.
+      bool isVideo = StringUtils::EndsWithNoCase(m_info.filename, ".mp4") ||
+                     StringUtils::EndsWithNoCase(m_info.filename, ".mkv") ||
+                     StringUtils::EndsWithNoCase(m_info.filename, ".avi") ||
+                     StringUtils::EndsWithNoCase(m_info.filename, ".mov") ||
+                     StringUtils::EndsWithNoCase(m_info.filename, ".wmv") ||
+                     StringUtils::EndsWithNoCase(m_info.filename, ".m4v") ||
+                     StringUtils::EndsWithNoCase(m_info.filename, ".ts") ||
+                     StringUtils::EndsWithNoCase(m_info.filename, ".webm");
+      if (!isVideo)
+        return false;
+    }
+    else
+      changed = true;
   }
   m_frameWidth = (float)m_texture.m_width;
   m_frameHeight = (float)m_texture.m_height;
+
+  // Initialize video decoder if this is a video background
+  if (StringUtils::EndsWithNoCase(m_info.filename, ".mp4") ||
+      StringUtils::EndsWithNoCase(m_info.filename, ".mkv") ||
+      StringUtils::EndsWithNoCase(m_info.filename, ".avi") ||
+      StringUtils::EndsWithNoCase(m_info.filename, ".mov") ||
+      StringUtils::EndsWithNoCase(m_info.filename, ".wmv") ||
+      StringUtils::EndsWithNoCase(m_info.filename, ".m4v") ||
+      StringUtils::EndsWithNoCase(m_info.filename, ".ts") ||
+      StringUtils::EndsWithNoCase(m_info.filename, ".webm"))
+  {
+    delete m_videoDecoder;
+    m_videoDecoder = new CVideoBackgroundDecoder();
+    if (m_videoDecoder->Open(m_info.filename))
+    {
+      delete m_videoTexture;
+      m_videoTexture = new CTexture();
+
+      // Add the video texture as the single frame so the rendering pipeline
+      // (Render, CalculateSize) has a valid texture slot.
+      // m_videoTexture is owned by this object (deleted in destructor);
+      // m_texture.Reset() only clears pointers without deleting, so no double-free.
+      if (!m_texture.size())
+      {
+        int vw = 0, vh = 0;
+        m_videoDecoder->GetCurrentFrame(vw, vh);
+        m_texture.Add(m_videoTexture, 0);
+        if (vw > 0 && vh > 0)
+        {
+          m_texture.m_width = vw;
+          m_texture.m_height = vh;
+          m_texture.m_texWidth = vw;
+          m_texture.m_texHeight = vh;
+          m_frameWidth = (float)vw;
+          m_frameHeight = (float)vh;
+        }
+        m_isAllocated = NORMAL;
+        changed = true;
+      }
+    }
+    else
+    {
+      delete m_videoDecoder;
+      m_videoDecoder = nullptr;
+    }
+  }
 
   // load the diffuse texture (if necessary)
   if (!m_info.diffuse.empty())
@@ -484,6 +566,20 @@ void CGUITextureBase::SetInvalid()
 
 bool CGUITextureBase::UpdateAnimFrame(unsigned int currentTime)
 {
+  // Streaming video background path
+  if (m_videoDecoder && m_videoDecoder->IsOpen())
+  {
+    if (m_videoDecoder->Update(currentTime))
+    {
+      int w = 0, h = 0;
+      const uint8_t* pixels = m_videoDecoder->GetCurrentFrame(w, h);
+      if (pixels && m_videoTexture)
+        m_videoTexture->LoadFromMemory(w, h, w * 4, XB_FMT_A8R8G8B8, true, pixels);
+      return true;
+    }
+    return false;
+  }
+
   bool changed = false;
   unsigned int delay = m_texture.m_delays[m_currentFrame];
 

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C C:/src/xbmc show master:project/cmake/CMakeLists.txt)"
+    ]
+  }
+}
