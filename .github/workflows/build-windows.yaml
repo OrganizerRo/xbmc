@@ -74,6 +74,9 @@ jobs:
         run: >
           bash -lc "pacman --needed --noconfirm -S
           base-devel
+          autoconf
+          automake
+          libtool
           git
           wget
           mingw-w64-i686-gcc
