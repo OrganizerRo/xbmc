@@ -127,7 +127,8 @@ if do_pkgConfig "gnutls = $GNUTLS_VER"; then
 
   ./configure --prefix=$LOCALDESTDIR --disable-shared --build="$MINGW_CHOST" --disable-cxx \
       --disable-doc --disable-tools --disable-tests --without-p11-kit --disable-rpath \
-      --disable-libdane --without-idn --without-tpm --enable-local-libopts --disable-guile
+      --disable-libdane --without-idn --without-tpm --enable-local-libopts --disable-guile \
+      --disable-hardware-acceleration
   sed -i 's/-lgnutls *$/-lgnutls -lnettle -lhogweed -lcrypt32 -lws2_32 -lz -lgmp -lintl -liconv/' \
   lib/gnutls.pc
   do_print_status "gnutls-${GNUTLS_VER}" "$blue_color" "Compiling"
