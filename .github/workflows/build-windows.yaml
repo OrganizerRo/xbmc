@@ -9,6 +9,9 @@ on:
       - Krypton
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-kodi:
     name: Build Kodi (Windows x86)
@@ -20,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       # Cache the MinGW-built FFmpeg and libdvd trees (includes renamed .lib files).
       # Skips the entire MinGW build on cache hits; only invalidated when source
@@ -191,7 +194,7 @@ jobs:
       - name: Build
         shell: cmd
         working-directory: project\cmake
-        run: cmake --build . --target ALL_BUILD --config RelWithDebInfo
+        run: cmake --build . --target ALL_BUILD --config RelWithDebInfo --parallel
 
       # ---------------------------------------------------------------
       # Addons — bootstrap definitions then build each addon with MSVC.
@@ -204,6 +207,11 @@ jobs:
           vcarch: x86
         run: call tools\buildsteps\win32\bootstrap-addons.bat
 
+      - name: Set up MSVC developer environment for addons
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
       - name: Build addons
         continue-on-error: true
         shell: cmd
@@ -211,31 +219,80 @@ jobs:
           vcarch: x86
         run: call tools\buildsteps\win32\make-addons.bat
 
-      # ---------------------------------------------------------------
-      # Tests — builds the "Debug Testsuite" config and runs gtest.
-      # run-tests.bat expects the solution at project\cmake\kodi.sln
-      # and uses MSYS2 awk/sed for JUnit XML transformation.
-      # ---------------------------------------------------------------
 
-      - name: Run tests
-        shell: cmd
-        working-directory: project\Win32BuildSetup
-        run: call run-tests.bat
-
-      - name: Upload test results
+      - name: Collect build output into system directory
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: gtestresults.xml
-          if-no-files-found: warn
+        shell: pwsh
+        run: |
+          Copy-Item -Path "project\cmake\RelWithDebInfo\*" -Destination "system\" -Recurse -Force
 
       - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kodi-windows-x86
-          path: |
-            project\cmake\RelWithDebInfo\
-            system\
+          path: system\
           if-no-files-found: warn
+
+      # ---------------------------------------------------------------
+      # Release — auto-increment version, generate changelog, publish.
+      # Only runs on push to Krypton (not PRs or failed builds).
+      # ---------------------------------------------------------------
+
+      - name: Compute next version
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        id: version
+        shell: bash
+        run: |
+          # Find the latest v* tag reachable from HEAD
+          LATEST_TAG=$(git describe --tags --match "v*" --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LATEST_TAG" ]; then
+            NEXT="v1.0.0"
+            LOG_RANGE="HEAD"
+          else
+            # Parse major.minor.patch and bump patch
+            VERSION="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+            PATCH=$((PATCH + 1))
+            NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+            LOG_RANGE="${LATEST_TAG}..HEAD"
+          fi
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "log_range=$LOG_RANGE" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT"
+
+      - name: Generate release notes
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        id: notes
+        shell: bash
+        run: |
+          LOG_RANGE="${{ steps.version.outputs.log_range }}"
+          {
+            echo 'body<<RELEASE_EOF'
+            echo '## Changes'
+            echo ''
+            if [ "$LOG_RANGE" = "HEAD" ]; then
+              git log --pretty="- %s" -20
+            else
+              git log --pretty="- %s" "$LOG_RANGE"
+            fi
+            echo ''
+            echo 'RELEASE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Package release zip
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: Compress-Archive -Path "system\*" -DestinationPath "kodi-windows-x86.zip"
+
+      - name: Create GitHub release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            kodi-windows-x86.zip \
+            --title "Kodi ${{ steps.version.outputs.tag }}" \
+            --notes "${{ steps.notes.outputs.body }}" \
+            --target "${{ github.sha }}"

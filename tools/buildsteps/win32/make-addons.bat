@@ -102,8 +102,8 @@ IF "%addon%" NEQ "" (
   ENDLOCAL & SET "ADDONS_TO_BUILD=%ADDONS_TO_BUILD%"
 )
 
-rem execute cmake to generate makefiles processable by nmake
-cmake "%ADDONS_PATH%" -G "NMake Makefiles" ^
+rem execute cmake to generate build files
+cmake "%ADDONS_PATH%" -G "Ninja" ^
       -DCMAKE_BUILD_TYPE=Release ^
       -DCMAKE_USER_MAKE_RULES_OVERRIDE="%SCRIPTS_PATH%/CFlagOverrides.cmake" ^
       -DCMAKE_USER_MAKE_RULES_OVERRIDE_CXX="%SCRIPTS_PATH%/CXXFlagOverrides.cmake" ^
@@ -121,7 +121,7 @@ IF ERRORLEVEL 1 (
 rem get the list of addons that can actually be built
 SET ADDONS_TO_MAKE=
 SETLOCAL EnableDelayedExpansion
-FOR /f "delims=" %%i IN ('nmake supported_addons') DO (
+FOR /f "delims=" %%i IN ('cmake --build . --target supported_addons 2^>^&1') DO (
   SET line="%%i"
   SET addons=!line:ALL_ADDONS_BUILDING=!
   IF NOT "!addons!" == "!line!" (
@@ -133,16 +133,16 @@ ENDLOCAL & SET "ADDONS_TO_MAKE=%ADDONS_TO_MAKE%"
 rem loop over all addons to build
 FOR %%a IN (%ADDONS_TO_MAKE%) DO (
   ECHO Building %%a...
-  rem execute nmake to build the addons
-  nmake %%a
+  rem build the addon using cmake (Ninja runs in parallel automatically)
+  cmake --build . --target %%a
   IF ERRORLEVEL 1 (
-    ECHO nmake %%a error level: %ERRORLEVEL% >> %ERRORFILE%
+    ECHO cmake --build %%a error level: %ERRORLEVEL% >> %ERRORFILE%
     ECHO %%a >> %ADDONS_FAILURE_FILE%
   ) ELSE (
     if %package% == true (
-      nmake package-%%a
+      cmake --build . --target package-%%a
       IF ERRORLEVEL 1 (
-        ECHO nmake package-%%a error level: %ERRORLEVEL% >> %ERRORFILE%
+        ECHO cmake --build package-%%a error level: %ERRORLEVEL% >> %ERRORFILE%
         ECHO %%a >> %ADDONS_FAILURE_FILE%
       ) ELSE (
         ECHO %%a >> %ADDONS_SUCCESS_FILE%
