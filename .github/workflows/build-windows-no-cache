@@ -1,4 +1,4 @@
-name: Build Kodi 17x86 for Win w/VST2 (No Cache)
+name: Build NC Kodi 17x86 for Win w/VST2
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 jobs:
-  build-kodi:
+  build-nc-kodi:
     name: Build Kodi (Windows x86.VST — No Cache)
     runs-on: windows-2022
     env:
