@@ -1,4 +1,4 @@
-name: Build Windows
+name: Build Kodi 17x86 for Win w/VST2
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build-kodi:
-    name: Build Kodi (Windows x86)
+    name: Build Kodi (Windows x86.VST)
     runs-on: windows-2022
     env:
       WORKSPACE: ${{ github.workspace }}
@@ -106,7 +106,7 @@ jobs:
 
       # Build FFmpeg and libdvd using the existing Kodi build scripts.
       # MSYSTEM=MINGW32 makes bash --login set up the i686-w64-mingw32 toolchain.
-      - name: Build FFmpeg and libdvd from source
+      - name: Build FFmpeg and libDVD from source
         if: steps.mingw-cache.outputs.cache-hit != 'true'
         timeout-minutes: 60
         shell: cmd
@@ -235,6 +235,7 @@ jobs:
       # ---------------------------------------------------------------
 
       - name: Compute next version
+        continue-on-error: true
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         id: version
         shell: bash
@@ -257,6 +258,7 @@ jobs:
           echo "Next version: $NEXT"
 
       - name: Generate release notes
+        continue-on-error: true
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         id: notes
         shell: bash
