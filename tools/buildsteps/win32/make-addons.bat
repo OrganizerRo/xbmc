@@ -103,7 +103,7 @@ IF "%addon%" NEQ "" (
 )
 
 rem execute cmake to generate build files
-cmake "%ADDONS_PATH%" -G "Ninja" ^
+cmake "%ADDONS_PATH%" -G "NMake Makefiles" ^
       -DCMAKE_BUILD_TYPE=Release ^
       -DCMAKE_USER_MAKE_RULES_OVERRIDE="%SCRIPTS_PATH%/CFlagOverrides.cmake" ^
       -DCMAKE_USER_MAKE_RULES_OVERRIDE_CXX="%SCRIPTS_PATH%/CXXFlagOverrides.cmake" ^
