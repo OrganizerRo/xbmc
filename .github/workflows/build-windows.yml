@@ -9,7 +9,7 @@ on:
   pull_request:
     branches: [main, master, Krypton]
   workflow_dispatch:
-
+    branches: [main, master, Krypton]
 jobs:
   build-windows:
     runs-on: windows-latest
