@@ -207,11 +207,6 @@ jobs:
           vcarch: x86
         run: call tools\buildsteps\win32\bootstrap-addons.bat
 
-      - name: Set up MSVC developer environment for addons
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x86
-
       - name: Build addons
         continue-on-error: true
         shell: cmd
