@@ -2,6 +2,7 @@ name: Build NC Kodi 17x86 for Win w/VST2
 
 on:
   workflow_dispatch:
+    branches: [main, master, Krypton]
 
 permissions:
   contents: write
