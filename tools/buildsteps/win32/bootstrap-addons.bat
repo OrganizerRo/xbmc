@@ -68,8 +68,20 @@ ECHO --------------------------------------------------
 ECHO Bootstrapping addons
 ECHO --------------------------------------------------
 
-rem execute cmake to generate makefiles processable by nmake
-cmake "%ADDONS_BOOTSTRAP_PATH%" -G "NMake Makefiles" ^
+rem pick a CMake generator: prefer Ninja, fall back to NMake Makefiles
+SET CMAKE_GENERATOR=
+WHERE ninja >NUL 2>&1 && SET CMAKE_GENERATOR=Ninja
+IF "%CMAKE_GENERATOR%"=="" (
+  WHERE nmake >NUL 2>&1 && SET CMAKE_GENERATOR=NMake Makefiles
+)
+IF "%CMAKE_GENERATOR%"=="" (
+  ECHO ERROR: Neither ninja nor nmake found in PATH.
+  ECHO Make sure Visual Studio C++ build tools are installed and vcvarsall.bat ran correctly.
+  GOTO ERROR
+)
+
+rem execute cmake to generate build files
+cmake "%ADDONS_BOOTSTRAP_PATH%" -G "%CMAKE_GENERATOR%" ^
       -DCMAKE_BUILD_TYPE=Release ^
       -DCMAKE_INSTALL_PREFIX=%ADDONS_DEFINITION_PATH% ^
       -DBUILD_DIR=%BOOTSTRAP_BUILD_PATH% ^
@@ -80,10 +92,10 @@ IF ERRORLEVEL 1 (
   GOTO ERROR
 )
 
-rem execute nmake to prepare the buildsystem
-nmake
+rem build (works with any generator)
+cmake --build .
 IF ERRORLEVEL 1 (
-  ECHO nmake failed
+  ECHO build failed
   GOTO ERROR
 )
 rem everything was fine
