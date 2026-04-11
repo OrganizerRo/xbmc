@@ -102,8 +102,21 @@ IF "%addon%" NEQ "" (
   ENDLOCAL & SET "ADDONS_TO_BUILD=%ADDONS_TO_BUILD%"
 )
 
+rem pick a CMake generator: prefer Ninja, fall back to NMake Makefiles
+SET CMAKE_GENERATOR=
+WHERE ninja >NUL 2>&1 && SET CMAKE_GENERATOR=Ninja
+IF "%CMAKE_GENERATOR%"=="" (
+  WHERE nmake >NUL 2>&1 && SET CMAKE_GENERATOR=NMake Makefiles
+)
+IF "%CMAKE_GENERATOR%"=="" (
+  ECHO ERROR: Neither ninja nor nmake found in PATH. >> %ERRORFILE%
+  ECHO Make sure Visual Studio C++ build tools are installed and vcvarsall.bat ran correctly. >> %ERRORFILE%
+  ECHO ERROR: Neither ninja nor nmake found in PATH.
+  GOTO ERROR
+)
+
 rem execute cmake to generate build files
-cmake "%ADDONS_PATH%" -G "NMake Makefiles" ^
+cmake "%ADDONS_PATH%" -G "%CMAKE_GENERATOR%" ^
       -DCMAKE_BUILD_TYPE=Release ^
       -DCMAKE_USER_MAKE_RULES_OVERRIDE="%SCRIPTS_PATH%/CFlagOverrides.cmake" ^
       -DCMAKE_USER_MAKE_RULES_OVERRIDE_CXX="%SCRIPTS_PATH%/CXXFlagOverrides.cmake" ^

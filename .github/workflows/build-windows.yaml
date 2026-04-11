@@ -204,16 +204,48 @@ jobs:
       - name: Bootstrap addons
         shell: cmd
         env:
-          vcarch: x86
+          vcarch: amd64_x86
         run: call tools\buildsteps\win32\bootstrap-addons.bat
 
       - name: Build addons
+        id: build-addons
         continue-on-error: true
         shell: cmd
         env:
-          vcarch: x86
+          vcarch: amd64_x86
         run: call tools\buildsteps\win32\make-addons.bat
 
+      - name: Display addon build errors
+        if: steps.build-addons.outcome == 'failure'
+        shell: pwsh
+        run: |
+          $errorFile = "$env:GITHUB_WORKSPACE\project\cmake\addons\make-addons.error"
+          $failureFile = "$env:GITHUB_WORKSPACE\project\cmake\addons\.failure"
+          if (Test-Path $errorFile) {
+            Write-Host "::error::Addon build failed — see details below"
+            Write-Host "========== make-addons.error =========="
+            Get-Content $errorFile
+            Write-Host "======================================="
+          }
+          if (Test-Path $failureFile) {
+            Write-Host "========== Failed addons =========="
+            Get-Content $failureFile
+            Write-Host "==================================="
+          }
+          if (-not (Test-Path $errorFile) -and -not (Test-Path $failureFile)) {
+            Write-Host "::warning::Build addons step failed but no error/failure files were generated"
+          }
+
+      - name: Upload addon build logs
+        if: steps.build-addons.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-build-errors
+          path: |
+            project/cmake/addons/make-addons.error
+            project/cmake/addons/.failure
+            project/cmake/addons/.success
+          if-no-files-found: warn
 
       - name: Collect build output into system directory
         if: always()
