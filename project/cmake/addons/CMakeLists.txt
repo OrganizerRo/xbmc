@@ -85,8 +85,8 @@ set(BUILD_ARGS -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}
                -DCMAKE_USER_MAKE_RULES_OVERRIDE_CXX=${CMAKE_USER_MAKE_RULES_OVERRIDE_CXX}
                -DCORE_SYSTEM_NAME=${CORE_SYSTEM_NAME}
                -DBUILD_SHARED_LIBS=1
-               -DCMAKE_C_FLAGS=${CMAKE_C_FLAGS}
-               -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS})
+               "-DCMAKE_C_FLAGS=${CMAKE_C_FLAGS}"
+               "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
 
 if(MSVC)
   # move cmake specific targets to a CMakePredefinedTargets folder in Visual Studio

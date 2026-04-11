@@ -176,12 +176,45 @@ jobs:
           if (Test-Path $ffmpegBin) { Copy-Item "$ffmpegBin\*.dll" $systemDir -Force }
           if (Test-Path $dvdBin)    { Copy-Item "$dvdBin\*.dll"    $systemDir -Force }
 
+      # The MinGW-built FFmpeg/libdvd DLLs depend on MinGW runtime libraries
+      # (libwinpthread, zlib, libiconv) which must also be shipped alongside.
+      - name: Copy MinGW runtime DLLs to system directory
+        shell: pwsh
+        run: |
+          $systemDir = "$env:GITHUB_WORKSPACE\system"
+          $mingwBin  = "C:\msys64\mingw32\bin"
+          $dlls = @(
+            "libwinpthread-1.dll",
+            "zlib1.dll",
+            "libiconv-2.dll"
+          )
+          foreach ($dll in $dlls) {
+            $src = Join-Path $mingwBin $dll
+            if (Test-Path $src) {
+              Copy-Item $src $systemDir -Force
+              Write-Host "Copied $dll"
+            } else {
+              Write-Error "Missing MinGW runtime DLL: $src"
+              exit 1
+            }
+          }
+
       # Downloads all other pre-built Windows deps (curl, openssl, sqlite, etc.)
       # from mirrors.kodi.tv into project/BuildDependencies/{lib,include}.
       - name: Download build dependencies
         shell: cmd
         working-directory: project/BuildDependencies
         run: DownloadBuildDeps.bat
+
+      - name: Validate python27.dll
+        shell: pwsh
+        run: |
+          $python = "$env:GITHUB_WORKSPACE\system\python27.dll"
+          if (-not (Test-Path $python)) {
+            Write-Error "python27.dll not found at $python after dependency download"
+            exit 1
+          }
+          Write-Host "python27.dll present at $python"
 
       # Build in project\cmake (in-source) so that run-tests.bat and other
       # helper scripts find the solution at the paths they expect
