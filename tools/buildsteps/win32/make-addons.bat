@@ -102,11 +102,11 @@ IF "%addon%" NEQ "" (
   ENDLOCAL & SET "ADDONS_TO_BUILD=%ADDONS_TO_BUILD%"
 )
 
-rem pick a CMake generator: prefer Ninja, fall back to NMake Makefiles
+rem pick a CMake generator: prefer NMake Makefiles, fall back to Ninja
 SET CMAKE_GENERATOR=
-WHERE ninja >NUL 2>&1 && SET CMAKE_GENERATOR=Ninja
+WHERE nmake >NUL 2>&1 && SET CMAKE_GENERATOR=NMake Makefiles
 IF "%CMAKE_GENERATOR%"=="" (
-  WHERE nmake >NUL 2>&1 && SET CMAKE_GENERATOR=NMake Makefiles
+  WHERE ninja >NUL 2>&1 && SET CMAKE_GENERATOR=Ninja
 )
 IF "%CMAKE_GENERATOR%"=="" (
   ECHO ERROR: Neither ninja nor nmake found in PATH. >> %ERRORFILE%
