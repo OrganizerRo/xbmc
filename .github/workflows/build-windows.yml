@@ -5,10 +5,11 @@ name: Build Kodi (Windows)
 
 on:
   push:
-    branches: [main, master, Krypton]
+    branches: [main, master, Krypton, Leia]
   pull_request:
-    branches: [main, master, Krypton]
+    branches: [main, master, Krypton, Leia]
   workflow_dispatch:
+    branches: [main, master, Krypton, Leia]
 
 jobs:
   build-windows:
