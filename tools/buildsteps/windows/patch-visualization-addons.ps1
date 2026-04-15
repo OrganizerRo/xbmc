@@ -24,22 +24,28 @@ if (-not $targets) {
 
 foreach ($target in $targets) {
   $content = Get-Content -LiteralPath $target.FullName -Raw
+  $lineEnding = if ($content.Contains("`r`n")) { "`r`n" } else { "`n" }
   $updated = $content
 
   $updated = $updated -replace '&__floor', '&floor'
   $updated = $updated -replace '&__ceil', '&ceil'
 
-  $updated = [regex]::Replace(
-    $updated,
-    '(?m)^(?!\s*#ifndef _MSC_VER\s*$)\s*(static\s+double\s+__floor\s*\([^\r\n]*\)\s*\{[^\r\n]*\}\s*)$',
-    "#ifndef _MSC_VER`r`n`$1`r`n#endif"
-  )
+  # The milkdrop nseel wrappers in affected sources are single-line definitions.
+  if ($updated -notmatch '(?ms)#ifndef\s+_MSC_VER\s*[\r\n]+\s*static\s+double\s+__floor\s*\(') {
+    $updated = [regex]::Replace(
+      $updated,
+      '(?m)^\s*(static\s+double\s+__floor\s*\([^\r\n]*\)\s*\{[^\r\n]*\}\s*)$',
+      "#ifndef _MSC_VER$lineEnding`$1$lineEnding#endif"
+    )
+  }
 
-  $updated = [regex]::Replace(
-    $updated,
-    '(?m)^(?!\s*#ifndef _MSC_VER\s*$)\s*(static\s+double\s+__ceil\s*\([^\r\n]*\)\s*\{[^\r\n]*\}\s*)$',
-    "#ifndef _MSC_VER`r`n`$1`r`n#endif"
-  )
+  if ($updated -notmatch '(?ms)#ifndef\s+_MSC_VER\s*[\r\n]+\s*static\s+double\s+__ceil\s*\(') {
+    $updated = [regex]::Replace(
+      $updated,
+      '(?m)^\s*(static\s+double\s+__ceil\s*\([^\r\n]*\)\s*\{[^\r\n]*\}\s*)$',
+      "#ifndef _MSC_VER$lineEnding`$1$lineEnding#endif"
+    )
+  }
 
   if ($updated -ne $content) {
     Set-Content -LiteralPath $target.FullName -Value $updated -NoNewline

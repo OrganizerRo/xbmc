@@ -83,8 +83,18 @@ jobs:
         shell: pwsh
         run: |
           $patchScript = Join-Path $env:GITHUB_WORKSPACE "tools\buildsteps\windows\patch-visualization-addons.ps1"
-          & $patchScript -AddonsBuildPath (Join-Path $env:GITHUB_WORKSPACE "kodi-build\addons\build")
-          & $patchScript -AddonsBuildPath (Join-Path $env:GITHUB_WORKSPACE "project\cmake\addons\build")
+          $candidatePaths = @(
+            (Join-Path $env:GITHUB_WORKSPACE "kodi-build\addons\build"),
+            (Join-Path $env:GITHUB_WORKSPACE "project\cmake\addons\build")
+          )
+          $existingPaths = $candidatePaths | Where-Object { Test-Path -LiteralPath $_ }
+          if (-not $existingPaths) {
+            Write-Host "No addon build directories found yet. Skipping visualization patching."
+            exit 0
+          }
+          foreach ($addonsPath in $existingPaths) {
+            & $patchScript -AddonsBuildPath $addonsPath
+          }
 
       - name: Build Kodi
         shell: cmd
