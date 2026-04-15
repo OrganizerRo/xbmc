@@ -114,6 +114,13 @@ IF ERRORLEVEL 1 (
   GOTO ERROR
 )
 
+rem patch known MSVC intrinsic conflicts in milkdrop addon sources
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0patch-visualization-addons.ps1" -AddonsBuildPath "%ADDONS_BUILD_PATH%"
+IF ERRORLEVEL 1 (
+  ECHO patch-visualization-addons.ps1 error level: %ERRORLEVEL% > %ERRORFILE%
+  GOTO ERROR
+)
+
 rem get the list of addons that can actually be built
 SET ADDONS_TO_MAKE=
 SETLOCAL EnableDelayedExpansion

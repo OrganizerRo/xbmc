@@ -79,6 +79,13 @@ jobs:
           cd kodi-build
           cmake -G "Visual Studio 17 2022" -A Win32 -DENABLE_INTERNAL_FFMPEG=ON -DKODI_MIRROR=http://mirrors.kodi.tv ..\project\cmake
 
+      - name: Patch visualization addon sources for MSVC
+        shell: pwsh
+        run: |
+          $patchScript = Join-Path $env:GITHUB_WORKSPACE "tools\buildsteps\windows\patch-visualization-addons.ps1"
+          & $patchScript -AddonsBuildPath (Join-Path $env:GITHUB_WORKSPACE "kodi-build\addons\build")
+          & $patchScript -AddonsBuildPath (Join-Path $env:GITHUB_WORKSPACE "project\cmake\addons\build")
+
       - name: Build Kodi
         shell: cmd
         run: |
