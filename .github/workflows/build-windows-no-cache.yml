@@ -94,7 +94,7 @@ jobs:
           MSYSTEM: MINGW32
         run: >
           bash --login -e
-          /xbmc/tools/buildsteps/win32/make-mingwlibs.sh
+          /xbmc/tools/buildsteps/windows/make-mingwlibs.sh
           --prompt=noprompt
           --mode=clean
           --build32=yes
@@ -239,7 +239,7 @@ jobs:
         shell: cmd
         env:
           vcarch: amd64_x86
-        run: call tools\buildsteps\win32\bootstrap-addons.bat
+        run: call tools\buildsteps\windows\win32\bootstrap-addons.bat
 
       - name: Build addons
         id: build-addons
@@ -247,14 +247,14 @@ jobs:
         shell: cmd
         env:
           vcarch: amd64_x86
-        run: call tools\buildsteps\win32\make-addons.bat
+        run: call tools\buildsteps\windows\win32\make-addons.bat
 
       - name: Display addon build errors
         if: steps.build-addons.outcome == 'failure'
         shell: pwsh
         run: |
-          $errorFile = "$env:GITHUB_WORKSPACE\project\cmake\addons\make-addons.error"
-          $failureFile = "$env:GITHUB_WORKSPACE\project\cmake\addons\.failure"
+          $errorFile = "$env:GITHUB_WORKSPACE\cmake\addons\make-addons.error"
+          $failureFile = "$env:GITHUB_WORKSPACE\cmake\addons\.failure"
           if (Test-Path $errorFile) {
             Write-Host "::error::Addon build failed — see details below"
             Write-Host "========== make-addons.error =========="
@@ -276,9 +276,9 @@ jobs:
         with:
           name: addon-build-errors-nocache
           path: |
-            project/cmake/addons/make-addons.error
-            project/cmake/addons/.failure
-            project/cmake/addons/.success
+            cmake/addons/make-addons.error
+            cmake/addons/.failure
+            cmake/addons/.success
           if-no-files-found: warn
 
       - name: Collect build output into system directory
