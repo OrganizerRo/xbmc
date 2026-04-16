@@ -1,0 +1,227 @@
+name: Build Kodi Addons (Leia Windows Split)
+
+on:
+  push:
+    branches: [Leia]
+  pull_request:
+    branches: [Leia]
+  workflow_dispatch:
+    inputs:
+      core_run_id:
+        description: Optional workflow run ID from windows-main-build-leia-split.yaml
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-addons:
+    name: Build Binary Addons (Windows x86)
+    runs-on: windows-2022
+    timeout-minutes: 120
+    if: github.ref_name == 'Leia' || github.base_ref == 'Leia'
+    env:
+      WORKSPACE: ${{ github.workspace }}
+    outputs:
+      addon_matrix: ${{ steps.collect-zips.outputs.addon_matrix }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve core SDK artifact run ID
+        id: resolve-run
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_CORE_RUN_ID: ${{ github.event.inputs.core_run_id }}
+        run: |
+          if ($env:INPUT_CORE_RUN_ID) {
+            "run_id=$env:INPUT_CORE_RUN_ID" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "Using provided core workflow run ID: $env:INPUT_CORE_RUN_ID"
+            exit 0
+          }
+
+          $branch = if ($env:GITHUB_BASE_REF) { $env:GITHUB_BASE_REF } else { $env:GITHUB_REF_NAME }
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/windows-main-build-leia-split.yaml/runs?branch=$branch&status=completed&per_page=50"
+          $resp = Invoke-RestMethod -Uri $uri -Headers $headers -Method GET
+          $run = $resp.workflow_runs | Where-Object { $_.conclusion -eq 'success' } | Select-Object -First 1
+          if (-not $run) {
+            throw "No successful windows-main-build-leia-split.yaml run found for branch '$branch'."
+          }
+
+          "run_id=$($run.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Using core workflow run ID: $($run.id)"
+
+      - name: Download core SDK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kodi-sdk-leia-windows
+          path: downloaded-sdk
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.resolve-run.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Restore SDK paths expected by addon build
+        shell: pwsh
+        run: |
+          $root = "$env:GITHUB_WORKSPACE\downloaded-sdk"
+          $copyPairs = @(
+            @{ Src = "project\cmake\RelWithDebInfo"; Dst = "project\cmake\RelWithDebInfo" },
+            @{ Src = "project\BuildDependencies\include"; Dst = "project\BuildDependencies\include" },
+            @{ Src = "project\BuildDependencies\lib"; Dst = "project\BuildDependencies\lib" },
+            @{ Src = "lib\win32\ffmpeg"; Dst = "lib\win32\ffmpeg" },
+            @{ Src = "lib\libdvd"; Dst = "lib\libdvd" },
+            @{ Src = "system"; Dst = "system" }
+          )
+
+          foreach ($pair in $copyPairs) {
+            $src = Join-Path $root $pair.Src
+            if (Test-Path $src) {
+              $dst = Join-Path $env:GITHUB_WORKSPACE $pair.Dst
+              New-Item -ItemType Directory -Force -Path $dst | Out-Null
+              Copy-Item -Path (Join-Path $src '*') -Destination $dst -Recurse -Force
+            }
+          }
+
+      - name: Add MSYS2 to PATH
+        shell: cmd
+        run: |
+          echo C:\msys64\usr\bin>>%GITHUB_PATH%
+          echo C:\msys64\bin>>%GITHUB_PATH%
+
+      - name: Create MSYS2 junctions
+        shell: cmd
+        run: |
+          if not exist C:\msys64\xbmc mklink /j C:\msys64\xbmc %GITHUB_WORKSPACE%
+          if not exist %GITHUB_WORKSPACE%\project\BuildDependencies\msys64 mklink /j %GITHUB_WORKSPACE%\project\BuildDependencies\msys64 C:\msys64
+
+      - name: Download build dependencies for addon build
+        shell: cmd
+        working-directory: project\BuildDependencies
+        run: DownloadBuildDeps.bat
+
+      - name: Bootstrap addons
+        shell: cmd
+        env:
+          vcarch: amd64_x86
+        run: call tools\buildsteps\windows\win32\bootstrap-addons.bat
+
+      - name: Build addons (continue on addon errors)
+        id: build-addons
+        continue-on-error: true
+        shell: cmd
+        env:
+          vcarch: amd64_x86
+        run: call tools\buildsteps\windows\win32\make-addons.bat package
+
+      - name: Summarize addon build status
+        if: always()
+        shell: pwsh
+        run: |
+          $successFile = "$env:GITHUB_WORKSPACE\cmake\addons\.success"
+          $failureFile = "$env:GITHUB_WORKSPACE\cmake\addons\.failure"
+          $errorFile = "$env:GITHUB_WORKSPACE\cmake\addons\make-addons.error"
+          $statusFile = "$env:GITHUB_WORKSPACE\cmake\addons\addon-build-status.txt"
+
+          $success = @()
+          $failure = @()
+          if (Test-Path $successFile) { $success = Get-Content $successFile | ForEach-Object { $_.Trim() } | Where-Object { $_ } }
+          if (Test-Path $failureFile) { $failure = Get-Content $failureFile | ForEach-Object { $_.Trim() } | Where-Object { $_ } }
+
+          @(
+            "Built add-ons: $($success.Count)",
+            "Failed add-ons: $($failure.Count)",
+            "",
+            "Successful:",
+            ($success -join [Environment]::NewLine),
+            "",
+            "Failed:",
+            ($failure -join [Environment]::NewLine)
+          ) | Set-Content -Path $statusFile -Encoding UTF8
+
+          if (Test-Path $errorFile) {
+            Write-Host "========== make-addons.error =========="
+            Get-Content $errorFile
+            Write-Host "======================================="
+          }
+
+      - name: Collect per-addon zip files for upload
+        id: collect-zips
+        if: always()
+        shell: pwsh
+        run: |
+          $successFile = "$env:GITHUB_WORKSPACE\cmake\addons\.success"
+          $zipDir = "$env:GITHUB_WORKSPACE\cmake\addons\build\zips"
+          $staging = "$env:GITHUB_WORKSPACE\.addon-zips"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+
+          $matrix = @()
+          if ((Test-Path $successFile) -and (Test-Path $zipDir)) {
+            $addons = Get-Content $successFile | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique
+            foreach ($addon in $addons) {
+              $zip = Get-ChildItem -Path $zipDir -Filter "$addon*.zip" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($zip) {
+                Copy-Item -Path $zip.FullName -Destination (Join-Path $staging "$addon.zip") -Force
+                $matrix += $addon
+              }
+            }
+          }
+
+          $json = ($matrix | ConvertTo-Json -Compress)
+          if (-not $json) { $json = '[]' }
+          "addon_matrix=$json" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload addon zip staging artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-zips-leia-windows-staging
+          path: .addon-zips/
+          if-no-files-found: warn
+
+      - name: Upload addon build logs and status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-build-logs-leia-windows
+          path: |
+            cmake/addons/make-addons.error
+            cmake/addons/.failure
+            cmake/addons/.success
+            cmake/addons/addon-build-status.txt
+          if-no-files-found: warn
+
+  upload-addon-artifacts:
+    name: Upload per-addon artifacts
+    runs-on: windows-2022
+    needs: build-addons
+    if: needs.build-addons.outputs.addon_matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        addon: ${{ fromJson(needs.build-addons.outputs.addon_matrix) }}
+
+    steps:
+      - name: Download addon zip staging artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: addon-zips-leia-windows-staging
+          path: .addon-zips
+
+      - name: Upload addon zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-${{ matrix.addon }}-leia-windows
+          path: .addon-zips/${{ matrix.addon }}.zip
+          if-no-files-found: warn
