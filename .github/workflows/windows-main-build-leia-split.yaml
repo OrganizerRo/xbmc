@@ -6,7 +6,8 @@ on:
   pull_request:
     branches: [Leia]
   workflow_dispatch:
-
+    branches: [Leia]
+    
 permissions:
   contents: read
 
