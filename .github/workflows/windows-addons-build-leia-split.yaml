@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [Leia]
   workflow_dispatch:
+    branches: [Leia]  
     inputs:
       core_run_id:
         description: Optional workflow run ID from windows-main-build-leia-split.yaml
