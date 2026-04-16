@@ -206,7 +206,7 @@ jobs:
     name: Upload per-addon artifacts
     runs-on: windows-2022
     needs: build-addons
-    if: needs.build-addons.outputs.addon_matrix != '[]'
+    if: needs.build-addons.outputs.addon_matrix && needs.build-addons.outputs.addon_matrix != '[]'
     strategy:
       fail-fast: false
       matrix:
