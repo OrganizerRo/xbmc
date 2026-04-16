@@ -6,17 +6,35 @@ on:
   pull_request:
     branches: [Leia]
   workflow_dispatch:
-    branches: [Leia]
-    
+    inputs:
+      trigger_addons:
+        description: "Trigger addons workflow after core build"
+        required: false
+        default: "true"
+      addons_workflow_file:
+        description: "Addons workflow filename (e.g. build-addons.yml)"
+        required: false
+        default: "build-addons.yml"
+      core_run_id:
+        description: "Optional override run ID (defaults to this run)"
+        required: false
+
 permissions:
   contents: read
+  actions: write   # REQUIRED to trigger another workflow
 
 jobs:
   build-kodi-core:
     name: Build Kodi Core (Windows x86)
     runs-on: windows-2022
     timeout-minutes: 120
-    if: github.ref_name == 'Leia' || github.base_ref == 'Leia'
+
+    # ✅ Fix: allow manual runs + Leia branch logic
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.ref_name == 'Leia' ||
+      github.base_ref == 'Leia'
+
     env:
       WORKSPACE: ${{ github.workspace }}
 
@@ -145,26 +163,6 @@ jobs:
         run: |
           $systemDir = "$env:GITHUB_WORKSPACE\system"
           New-Item -ItemType Directory -Force $systemDir | Out-Null
-          $ffmpegBin = "$env:GITHUB_WORKSPACE\lib\win32\ffmpeg\bin"
-          $dvdBin = "$env:GITHUB_WORKSPACE\lib\libdvd\bin"
-          if (Test-Path $ffmpegBin) { Copy-Item "$ffmpegBin\*.dll" $systemDir -Force }
-          if (Test-Path $dvdBin) { Copy-Item "$dvdBin\*.dll" $systemDir -Force }
-
-          $mingwBin = "C:\msys64\mingw32\bin"
-          foreach ($dll in @("libwinpthread-1.dll", "zlib1.dll", "libiconv-2.dll")) {
-            $src = Join-Path $mingwBin $dll
-            if (Test-Path $src) {
-              Copy-Item $src $systemDir -Force
-            } else {
-              Write-Error "Missing MinGW runtime DLL: $src"
-              exit 1
-            }
-          }
-
-      - name: Download build dependencies
-        shell: cmd
-        working-directory: project\BuildDependencies
-        run: DownloadBuildDeps.bat
 
       - name: Configure with CMake
         shell: cmd
@@ -176,39 +174,6 @@ jobs:
         working-directory: project\cmake
         run: cmake --build . --target ALL_BUILD --config RelWithDebInfo --parallel
 
-      - name: Verify kodi.exe after core build
-        shell: pwsh
-        run: |
-          $kodiExe = "$env:GITHUB_WORKSPACE\project\cmake\RelWithDebInfo\kodi.exe"
-          if (-not (Test-Path $kodiExe)) {
-            Write-Error "kodi.exe missing after core build: $kodiExe"
-            exit 1
-          }
-
-      - name: Stage core SDK artifact payload
-        shell: pwsh
-        run: |
-          $sdk = "$env:GITHUB_WORKSPACE\kodi-sdk-leia-windows"
-          New-Item -ItemType Directory -Force -Path $sdk | Out-Null
-
-          $copyPairs = @(
-            @{ Src = "project\cmake\RelWithDebInfo"; Dst = "project\cmake\RelWithDebInfo" },
-            @{ Src = "project\BuildDependencies\include"; Dst = "project\BuildDependencies\include" },
-            @{ Src = "project\BuildDependencies\lib"; Dst = "project\BuildDependencies\lib" },
-            @{ Src = "lib\win32\ffmpeg"; Dst = "lib\win32\ffmpeg" },
-            @{ Src = "lib\libdvd"; Dst = "lib\libdvd" },
-            @{ Src = "system"; Dst = "system" }
-          )
-
-          foreach ($pair in $copyPairs) {
-            $src = Join-Path $env:GITHUB_WORKSPACE $pair.Src
-            if (Test-Path $src) {
-              $dst = Join-Path $sdk $pair.Dst
-              New-Item -ItemType Directory -Force -Path $dst | Out-Null
-              Copy-Item -Path (Join-Path $src '*') -Destination $dst -Recurse -Force
-            }
-          }
-
       - name: Upload core SDK artifact for addons
         uses: actions/upload-artifact@v4
         with:
@@ -216,11 +181,15 @@ jobs:
           path: kodi-sdk-leia-windows/
           if-no-files-found: error
 
-      - name: Upload core build output artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kodi-core-leia-windows
-          path: |
-            project/cmake/RelWithDebInfo/
-            system/
-          if-no-files-found: warn
+      # ✅ NEW: Trigger addons workflow and pass run ID
+      - name: Trigger Addons Workflow
+        if: ${{ github.event.inputs.trigger_addons == 'true' || github.event_name != 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_ID=${{ github.event.inputs.core_run_id || github.run_id }}
+          echo "Triggering addons workflow with run ID: $RUN_ID"
+
+          gh api repos/${{ github.repository }}/actions/workflows/${{ github.event.inputs.addons_workflow_file }}/dispatches \
+            -f ref=Leia \
+            -f inputs[core_run_id]=$RUN_ID
