@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [Leia]
   workflow_dispatch:
-    branches: [Leia]  
     inputs:
       core_run_id:
         description: Optional workflow run ID from windows-main-build-leia-split.yaml
@@ -22,18 +21,29 @@ jobs:
     name: Build Binary Addons (Windows x86)
     runs-on: windows-2022
     timeout-minutes: 120
-    if: github.ref_name == 'Leia' || github.base_ref == 'Leia'
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.ref_name == 'Leia' ||
+      github.base_ref == 'Leia'
     env:
       WORKSPACE: ${{ github.workspace }}
     outputs:
       addon_matrix: ${{ steps.collect-zips.outputs.addon_matrix }}
 
     steps:
+      - name: Ensure Leia branch for manual run
+        if: github.event_name == 'workflow_dispatch' && github.ref_name != 'Leia'
+        shell: pwsh
+        run: |
+          Write-Error "This workflow must be run on the Leia branch."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 🔧 FIXED: Resolve workflow ID first, then fetch correct runs
       - name: Resolve core SDK artifact run ID
         id: resolve-run
         shell: pwsh
@@ -48,17 +58,35 @@ jobs:
           }
 
           $branch = if ($env:GITHUB_BASE_REF) { $env:GITHUB_BASE_REF } else { $env:GITHUB_REF_NAME }
+
           $headers = @{
             Authorization = "Bearer $env:GITHUB_TOKEN"
             Accept = "application/vnd.github+json"
             "X-GitHub-Api-Version" = "2022-11-28"
           }
 
-          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/windows-main-build-leia-split.yaml/runs?branch=$branch&status=completed&per_page=50"
-          $resp = Invoke-RestMethod -Uri $uri -Headers $headers -Method GET
-          $run = $resp.workflow_runs | Where-Object { $_.conclusion -eq 'success' } | Select-Object -First 1
+          # Step 1: Get workflow ID by filename (reliable lookup)
+          $wfUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows"
+          $wfResp = Invoke-RestMethod -Uri $wfUri -Headers $headers -Method GET
+
+          $workflow = $wfResp.workflows | Where-Object { $_.path -like "*windows-main-build-leia-split.yaml" } | Select-Object -First 1
+          if (-not $workflow) {
+            throw "Could not find workflow 'windows-main-build-leia-split.yaml'"
+          }
+
+          Write-Host "Found workflow ID: $($workflow.id)"
+
+          # Step 2: Query runs using workflow ID (avoids ambiguity)
+          $runsUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/$($workflow.id)/runs?branch=$branch&status=completed&per_page=50"
+          $runsResp = Invoke-RestMethod -Uri $runsUri -Headers $headers -Method GET
+
+          $run = $runsResp.workflow_runs |
+            Where-Object { $_.conclusion -eq 'success' } |
+            Sort-Object created_at -Descending |
+            Select-Object -First 1
+
           if (-not $run) {
-            throw "No successful windows-main-build-leia-split.yaml run found for branch '$branch'."
+            throw "No successful runs found for workflow on branch '$branch'."
           }
 
           "run_id=$($run.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
