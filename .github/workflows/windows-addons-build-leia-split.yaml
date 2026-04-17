@@ -162,6 +162,7 @@ jobs:
           $failureFile = "$env:GITHUB_WORKSPACE\cmake\addons\.failure"
           $errorFile = "$env:GITHUB_WORKSPACE\cmake\addons\make-addons.error"
           $statusFile = "$env:GITHUB_WORKSPACE\cmake\addons\addon-build-status.txt"
+          $logsDir = "$env:GITHUB_WORKSPACE\cmake\addons\logs"
 
           $success = @()
           $failure = @()
@@ -183,6 +184,18 @@ jobs:
             Write-Host "========== make-addons.error =========="
             Get-Content $errorFile
             Write-Host "======================================="
+          }
+
+          foreach ($addon in $failure) {
+            $addon = $addon.Trim()
+            if (-not $addon) { continue }
+            $log = Join-Path $logsDir "$addon.log"
+            if (Test-Path $log) {
+              Write-Host ""
+              Write-Host "========== Build log: $addon =========="
+              Get-Content $log
+              Write-Host "======================================="
+            }
           }
 
       - name: Collect per-addon zip files for upload
@@ -229,6 +242,7 @@ jobs:
             cmake/addons/.failure
             cmake/addons/.success
             cmake/addons/addon-build-status.txt
+            cmake/addons/logs/
           if-no-files-found: warn
 
   upload-addon-artifacts:

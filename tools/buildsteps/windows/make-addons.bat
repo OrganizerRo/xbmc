@@ -40,10 +40,14 @@ SET ADDONS_SUCCESS_FILE=%ADDONS_PATH%\.success
 SET ADDONS_FAILURE_FILE=%ADDONS_PATH%\.failure
 
 SET ERRORFILE=%ADDONS_PATH%\make-addons.error
+SET ADDON_LOGS_DIR=%ADDONS_PATH%\logs
 
 rem remove the success and failure files from a previous build
 DEL /F %ADDONS_SUCCESS_FILE% > NUL 2>&1
 DEL /F %ADDONS_FAILURE_FILE% > NUL 2>&1
+
+rem create the per-addon log directory
+IF NOT EXIST "%ADDON_LOGS_DIR%" MKDIR "%ADDON_LOGS_DIR%"
 
 IF %clean% == true (
   rem remove the build directory if it exists
@@ -136,14 +140,14 @@ SETLOCAL DisableDelayedExpansion
 rem loop over all addons to build
 FOR %%a IN (%ADDONS_TO_MAKE%) DO (
   ECHO Building %%a...
-  rem execute cmake to build the addons
-  cmake --build . --target %%a
+  rem execute cmake to build the addon, capturing all output to a per-addon log file
+  cmake --build . --target %%a > "%ADDON_LOGS_DIR%\%%a.log" 2>&1
   IF ERRORLEVEL 1 (
     ECHO nmake %%a error level: %ERRORLEVEL% > %ERRORFILE%
     ECHO %%a >> %ADDONS_FAILURE_FILE%
   ) ELSE (
     if %package% == true (
-      nmake package-%%a
+      nmake package-%%a >> "%ADDON_LOGS_DIR%\%%a.log" 2>&1
       IF ERRORLEVEL 1 (
         ECHO nmake package-%%a error level: %ERRORLEVEL% > %ERRORFILE%
         ECHO %%a >> %ADDONS_FAILURE_FILE%

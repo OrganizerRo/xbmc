@@ -1,0 +1,472 @@
+name: Build Kodi 18leia for Win w/VST2
+
+# Repository secret ORGANIZERRO_PAT: same value as local .git/organizerro_pat.txt (required for gh release as OrganizerRo).
+# Checkout falls back to github.token when the secret is unset so forks/public clones can still run builds.
+
+on:
+  push:
+    branches:
+      - Leia
+  pull_request:
+    branches:
+      - Leia
+  # workflow_dispatch has no `branches` key in GitHub's schema; manual runs use the branch selected in the UI.
+  workflow_dispatch:
+permissions:
+  contents: write
+
+jobs:
+  build-kodi-leia:
+    name: Build Kodi.Leia (Windows x86.VST)
+    runs-on: windows-2022
+    env:
+      WORKSPACE: ${{ github.workspace }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Prefer ORGANIZERRO_PAT (same as local .git/organizerro_pat.txt); fall back until the secret is added in repo Settings.
+          token: ${{ secrets.ORGANIZERRO_PAT != '' && secrets.ORGANIZERRO_PAT || github.token }}
+
+      # Cache the MinGW-built FFmpeg tree (MSVC .lib files produced by
+      # --toolchain=msvc).  The build scripts install to
+      # project/BuildDependencies/mingwlibs/win32/ which CMake picks up
+      # via MINGW_LIBS_DIR in cmake/scripts/windows/ArchSetup.cmake.
+      - name: Cache MinGW-built libraries
+        uses: actions/cache@v4
+        id: mingw-cache
+        with:
+          path: |
+            project/BuildDependencies/mingwlibs
+          key: mingw-libs-${{ hashFiles('tools/depends/target/ffmpeg/FFMPEG-VERSION',
+                                        'tools/buildsteps/windows/make-mingwlibs.sh',
+                                        'tools/buildsteps/windows/buildhelpers.sh',
+                                        'tools/buildsteps/windows/buildffmpeg.sh',
+                                        'tools/buildsteps/windows/ffmpeg_options.txt',
+                                        'tools/buildsteps/windows/patches/*.patch') }}
+
+      # ---------------------------------------------------------------
+      # MSYS2 setup — always runs.  The MinGW build needs the full
+      # environment; run-tests.bat needs awk/sed even on cache hits.
+      # ---------------------------------------------------------------
+
+      - name: Add MSYS2 to PATH
+        shell: cmd
+        run: |
+          echo C:\msys64\usr\bin>>%GITHUB_PATH%
+          echo C:\msys64\bin>>%GITHUB_PATH%
+
+      # Mount the workspace as C:\msys64\xbmc (junction). MSYS2 maps / to C:\msys64,
+      # so /xbmc/tools/... resolves to the repo without a root symlink (ln at /xbmc
+      # fails on Windows runners without symlink privileges).
+      # Also link MSYS2 into BuildDependencies so make-mingwlibs.bat and
+      # run-tests.bat can find awk.exe, sed.exe, sh.exe etc.
+      - name: Create MSYS2 junctions
+        shell: cmd
+        run: |
+          if not exist C:\msys64\xbmc mklink /j C:\msys64\xbmc %GITHUB_WORKSPACE%
+          if not exist %GITHUB_WORKSPACE%\project\BuildDependencies\msys64 mklink /j %GITHUB_WORKSPACE%\project\BuildDependencies\msys64 C:\msys64
+
+      # Write MSYS2 fstab so /depends/win32, /local32, /build, /downloads
+      # resolve the same way download-msys2.bat configures a local dev box.
+      - name: Write MSYS2 fstab mounts
+        shell: cmd
+        run: |
+          set "BD=%GITHUB_WORKSPACE%\project\BuildDependencies"
+          if not exist "%BD%\win32" mkdir "%BD%\win32"
+          if not exist "%BD%\locals\win32\lib" mkdir "%BD%\locals\win32\lib"
+          if not exist "%BD%\locals\win32\include" mkdir "%BD%\locals\win32\include"
+          if not exist "%BD%\locals\win32\etc" mkdir "%BD%\locals\win32\etc"
+          if not exist "%BD%\build" mkdir "%BD%\build"
+          if not exist "%BD%\downloads" mkdir "%BD%\downloads"
+          (
+            echo.
+            echo.%BD%\build\            /build
+            echo.%BD%\downloads\        /downloads
+            echo.%BD%\locals\win32\     /local32
+            echo.%BD%\win32\            /depends/win32
+          )>>C:\msys64\etc\fstab
+
+      # Download pre-built Win32 dependencies (zlib, curl, sqlite …) from
+      # mirrors.kodi.tv *before* the FFmpeg build, so buildffmpeg.sh can
+      # find zlib via -I/depends/win32/include -LIBPATH:/depends/win32/lib.
+      - name: Download build dependencies (pre-FFmpeg)
+        shell: cmd
+        run: call tools\buildsteps\windows\download-dependencies.bat
+
+      # ---------------------------------------------------------------
+      # MinGW build (cache miss only)
+      # ---------------------------------------------------------------
+
+      - name: Update MSYS2 package database
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: bash -lc "pacman --needed --noconfirm -Sy"
+
+      - name: Install MinGW32 build tools
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: >
+          bash -lc "pacman --needed --noconfirm -S
+          base-devel
+          autoconf
+          automake
+          libtool
+          git
+          wget
+          mingw-w64-i686-gcc
+          mingw-w64-i686-binutils
+          mingw-w64-i686-pkg-config
+          mingw-w64-i686-gnutls
+          mingw-w64-i686-yasm"
+
+      # Write the profile.local that make-mingwlibs.sh sources at runtime.
+      # /local32, /build etc. are now fstab-mounted to BuildDependencies/.
+      # MINGW_CHOST and MINGW_PREFIX are required by configure --build=
+      # in buildffmpeg.sh and buildlibdvd.sh.
+      - name: Set up MinGW32 build environment
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          bash -c "printf 'export BITS=32bit\nexport LOCALBUILDDIR=/build\nexport LOCALDESTDIR=/local32\nexport MINGW_PREFIX=/mingw32\nexport MINGW_CHOST=i686-w64-mingw32\nexport PKG_CONFIG_PATH=/local32/lib/pkgconfig:/mingw32/lib/pkgconfig\n' > /local32/etc/profile.local"
+
+      # FFmpeg --toolchain=msvc + --enable-openssl needs MSVC import libs (not MSYS2 mingw openssl).
+      - name: Install OpenSSL Win32 (MSVC libs)
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $root = 'C:\OpenSSL-Win32'
+          if (Test-Path "$root\include\openssl\ssl.h") {
+            Write-Host "OpenSSL already present at $root"
+            exit 0
+          }
+          $url = 'https://slproweb.com/download/Win32OpenSSL-1_1_1w.exe'
+          $out = Join-Path $env:TEMP 'Win32OpenSSL.exe'
+          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
+          $p = Start-Process -FilePath $out -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', "/DIR=$root" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "OpenSSL installer exit code $($p.ExitCode)" }
+          if (-not (Test-Path "$root\include\openssl\ssl.h")) {
+            throw "OpenSSL headers missing under $root after install"
+          }
+          $libs = @(Get-ChildItem -Path $root -Recurse -Filter 'libssl.lib' -ErrorAction SilentlyContinue)
+          if ($libs.Count -eq 0) {
+            throw "libssl.lib not found under $root after install (need full Win32 OpenSSL, not Light)"
+          }
+          $libs | ForEach-Object { Write-Host "Found: $($_.FullName)" }
+
+      # Build FFmpeg and libdvd using the existing Kodi build scripts.
+      # MSYSTEM=MINGW32 makes bash --login set up the i686-w64-mingw32 toolchain.
+      # FFmpeg configure uses --toolchain=msvc (buildffmpeg.sh); load VS 2022 x86 tools first.
+      - name: Build FFmpeg and libDVD from source
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 60
+        shell: cmd
+        env:
+          MSYSTEM: MINGW32
+          # Preserve PATH from vcvars (cl, link, lib) — bash --login otherwise drops it.
+          MSYS2_PATH_TYPE: inherit
+          OPENSSL_ROOT_DIR: C:\OpenSSL-Win32
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
+          bash --login -e -c "export OPENSSL_ROOT_DIR=C:/OpenSSL-Win32 && exec /xbmc/tools/buildsteps/windows/make-mingwlibs.sh --prompt=noprompt --mode=clean --build32=yes --build64=no"
+
+      # Validate that make-mingwlibs.sh installed FFmpeg to the expected
+      # prefix (project/BuildDependencies/mingwlibs/win32).  With
+      # --toolchain=msvc the output is already MSVC .lib files.
+      - name: Validate MinGW build outputs
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $mgDir = "$env:GITHUB_WORKSPACE\project\BuildDependencies\mingwlibs\win32"
+          $libs = @("lib\avcodec.lib", "lib\avformat.lib", "lib\avutil.lib",
+                    "lib\swscale.lib", "lib\swresample.lib", "lib\postproc.lib",
+                    "lib\avfilter.lib")
+          $failed = $false
+          foreach ($rel in $libs) {
+            $path = Join-Path $mgDir $rel
+            if (-not (Test-Path $path)) {
+              Write-Error "Missing: $path"
+              $failed = $true
+            }
+          }
+          if (-not (Test-Path "$mgDir\include")) {
+            Write-Error "Missing: $mgDir\include"
+            $failed = $true
+          }
+          if ($failed) { exit 1 }
+          Write-Host "FFmpeg MSVC libs validated under $mgDir"
+
+      # ---------------------------------------------------------------
+      # These steps always run (cache hit or miss).
+      # ---------------------------------------------------------------
+
+      # FFmpeg is built static (--disable-shared); no FFmpeg DLLs to copy.
+      # Ensure system/ directory exists for later steps.
+      - name: Prepare system directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\system" | Out-Null
+
+      # Ensure pre-built Windows deps are present (idempotent; the early
+      # download before FFmpeg already fetched them, but the script skips
+      # existing files so this is a no-op / safety net).
+      - name: Download build dependencies
+        shell: cmd
+        run: call tools\buildsteps\windows\download-dependencies.bat
+
+      # Leia has CMakeLists.txt at repo root; use an out-of-source build dir.
+      - name: Configure with CMake
+        shell: cmd
+        run: |
+          mkdir kodi-build
+          cd kodi-build
+          cmake -G "Visual Studio 17 2022" -A Win32 %GITHUB_WORKSPACE%
+
+      - name: Build
+        shell: cmd
+        working-directory: kodi-build
+        run: cmake --build . --target ALL_BUILD --config RelWithDebInfo --parallel
+
+      - name: Verify kodi.exe after main build
+        shell: pwsh
+        run: |
+          $exe = "$env:GITHUB_WORKSPACE\kodi-build\RelWithDebInfo\kodi.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "kodi.exe not found at $exe"
+            exit 1
+          }
+          Write-Host "Found $exe"
+
+      # ---------------------------------------------------------------
+      # Addons — bootstrap definitions, configure (downloads sources),
+      # patch visualization addons for MSVC intrinsics, then build.
+      # vcvars32.bat is loaded in each step to ensure nmake.exe is in PATH.
+      # ---------------------------------------------------------------
+
+      - name: Bootstrap addons
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
+          call tools\buildsteps\windows\bootstrap-addons.bat
+
+      - name: Disable visualization milkdrop addons on Windows
+        shell: pwsh
+        run: |
+          # visualization.milkdrop and visualization.milkdrop2 (Leia branch) use __floor/__ceil
+          # as function pointers. MSVC 14.44+ treats these as pure intrinsics (error C7552),
+          # so neither addon can be built on Windows. Writing platforms.txt with "!windows"
+          # causes CMake to skip each addon entirely during configure.
+          foreach ($addon in @("visualization.milkdrop", "visualization.milkdrop2")) {
+            $dir = "$env:GITHUB_WORKSPACE\cmake\addons\addons\$addon"
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Set-Content -Path "$dir\platforms.txt" -Value "!windows"
+            Write-Host "$addon marked as unsupported on windows — skipping"
+          }
+
+      - name: Configure addons and download sources
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
+          if not exist cmake\addons\build mkdir cmake\addons\build
+          if not exist cmake\addons\output mkdir cmake\addons\output
+          cd /d "%GITHUB_WORKSPACE%\cmake\addons\build"
+          cmake %GITHUB_WORKSPACE%\cmake\addons -G "NMake Makefiles" ^
+                -DCMAKE_BUILD_TYPE=Release ^
+                -DCMAKE_USER_MAKE_RULES_OVERRIDE=%GITHUB_WORKSPACE%\cmake\scripts\windows\CFlagOverrides.cmake ^
+                -DCMAKE_USER_MAKE_RULES_OVERRIDE_CXX=%GITHUB_WORKSPACE%\cmake\scripts\windows\CXXFlagOverrides.cmake ^
+                -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\project\Win32BuildSetup\BUILD_WIN32\addons ^
+                -DBUILD_DIR=%GITHUB_WORKSPACE%\cmake\addons\build ^
+                -DADDON_DEPENDS_PATH=%GITHUB_WORKSPACE%\cmake\addons\output ^
+                -DPACKAGE_ZIP=ON
+
+      - name: Patch addons for MSVC compatibility
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\tools\buildsteps\windows\patch-visualization-addons.ps1" `
+              -BuildDir "$env:GITHUB_WORKSPACE\cmake\addons\build"
+
+      # Pass /D_CRT_DECLARE_NONSTDC_NAMES=1 via the CL env var so cl.exe picks it
+      # up at every invocation regardless of cmake ExternalProject nesting depth.
+      # This ensures PTRDIFF_MAX is declared in MSVC 14.44+ headers (fixes C2065
+      # in libde265/xlocnum for imagedecoder.heif) without modifying any source.
+      - name: Set CL env for MSVC addon build
+        shell: cmd
+        run: echo CL=/D_CRT_DECLARE_NONSTDC_NAMES=1>> %GITHUB_ENV%
+
+      - name: Build addons
+        id: build-addons
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
+          set "ADDONS_SUCCESS_FILE=%GITHUB_WORKSPACE%\cmake\addons\.success"
+          set "ADDONS_FAILURE_FILE=%GITHUB_WORKSPACE%\cmake\addons\.failure"
+          set "ERRORFILE=%GITHUB_WORKSPACE%\cmake\addons\make-addons.error"
+          del /f "%ADDONS_SUCCESS_FILE%" 2>nul
+          del /f "%ADDONS_FAILURE_FILE%" 2>nul
+          set "ADDON_LOGS_DIR=%GITHUB_WORKSPACE%\cmake\addons\logs"
+          if not exist "%ADDON_LOGS_DIR%" mkdir "%ADDON_LOGS_DIR%"
+          cd /d "%GITHUB_WORKSPACE%\cmake\addons\build"
+          setlocal enabledelayedexpansion
+          set "ADDONS_TO_MAKE="
+          for /f "tokens=*" %%i in ('cmake --build . --target supported_addons 2^>^&1') do (
+            set "ln=%%i"
+            if not "!ln:ALL_ADDONS_BUILDING=!" == "!ln!" (
+              set "ADDONS_TO_MAKE=!ln:*ALL_ADDONS_BUILDING: =!"
+            )
+          )
+          for %%a in (!ADDONS_TO_MAKE!) do (
+            echo Building %%a...
+            set "ADDON_LOG=!ADDON_LOGS_DIR!\%%a.log"
+            cmake --build . --target %%a > "!ADDON_LOG!" 2>&1
+            if errorlevel 1 (
+              echo %%a >> "%ERRORFILE%"
+              echo %%a >> "%ADDONS_FAILURE_FILE%"
+            ) else (
+              echo %%a >> "%ADDONS_SUCCESS_FILE%"
+            )
+          )
+          endlocal
+          if exist "%ADDONS_FAILURE_FILE%" exit /b 1
+
+      - name: Display addon build errors
+        if: failure()
+        shell: pwsh
+        run: |
+          $errorFile = "$env:GITHUB_WORKSPACE\cmake\addons\make-addons.error"
+          $failureFile = "$env:GITHUB_WORKSPACE\cmake\addons\.failure"
+          $logsDir = "$env:GITHUB_WORKSPACE\cmake\addons\logs"
+          if (Test-Path $errorFile) {
+            Write-Host "::error::Addon build failed — see details below"
+            Write-Host "========== make-addons.error =========="
+            Get-Content $errorFile
+            Write-Host "======================================="
+          }
+          if (Test-Path $failureFile) {
+            Write-Host "========== Failed addons =========="
+            Get-Content $failureFile
+            Write-Host "==================================="
+            foreach ($addon in (Get-Content $failureFile)) {
+              $addon = $addon.Trim()
+              if (-not $addon) { continue }
+              $log = Join-Path $logsDir "$addon.log"
+              if (Test-Path $log) {
+                Write-Host ""
+                Write-Host "========== Build log: $addon =========="
+                Get-Content $log
+                Write-Host "======================================="
+              }
+            }
+          }
+          if (-not (Test-Path $errorFile) -and -not (Test-Path $failureFile)) {
+            Write-Host "::warning::Build addons step failed but no error/failure files were generated"
+          }
+
+      - name: Upload addon build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-build-errors
+          path: |
+            cmake/addons/make-addons.error
+            cmake/addons/.failure
+            cmake/addons/.success
+            cmake/addons/logs/
+          if-no-files-found: warn
+
+      # Only collect when the addon step succeeded — avoids packaging a partial tree when addons fail.
+      - name: Collect build output into system directory
+        if: success()
+        shell: pwsh
+        run: |
+          Copy-Item -Path "kodi-build\RelWithDebInfo\*" -Destination "system\" -Recurse -Force
+
+      - name: Verify kodi.exe in system output
+        if: success()
+        shell: pwsh
+        run: |
+          $exe = "$env:GITHUB_WORKSPACE\system\kodi.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "kodi.exe not found under system\ after collect"
+            exit 1
+          }
+          Write-Host "Verified $exe"
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodi-windows-x86
+          path: |
+            project/Win32BuildSetup/BUILD_WIN32/addons/
+            system\
+            kodi-build/RelWithDebInfo/
+          if-no-files-found: warn
+
+      # ---------------------------------------------------------------
+      # Release — auto-increment version, generate changelog, publish.
+      # Runs on push / workflow_dispatch to Leia only when prior steps succeeded.
+      # ---------------------------------------------------------------
+
+      - name: Compute next version
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        id: version
+        shell: bash
+        run: |
+          # Find the latest v* tag reachable from HEAD
+          LATEST_TAG=$(git describe --tags --match "v*" --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LATEST_TAG" ]; then
+            NEXT="v1.0.0"
+            LOG_RANGE="HEAD"
+          else
+            # Parse major.minor.patch and bump patch
+            VERSION="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+            PATCH=$((PATCH + 1))
+            NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+            LOG_RANGE="${LATEST_TAG}..HEAD"
+          fi
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "log_range=$LOG_RANGE" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT"
+
+      - name: Generate release notes
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        id: notes
+        shell: bash
+        run: |
+          LOG_RANGE="${{ steps.version.outputs.log_range }}"
+          {
+            echo 'body<<RELEASE_EOF'
+            echo '## Changes'
+            echo ''
+            if [ "$LOG_RANGE" = "HEAD" ]; then
+              git log --pretty="- %s" -20
+            else
+              git log --pretty="- %s" "$LOG_RANGE"
+            fi
+            echo ''
+            echo 'RELEASE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Package release zip
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        shell: pwsh
+        run: Compress-Archive -Path "system\*" -DestinationPath "kodi-windows-x86.zip"
+
+      - name: Create GitHub release
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        env:
+          # Prefer ORGANIZERRO_PAT (same as local .git/organizerro_pat.txt); fall back to github.token.
+          GH_TOKEN: ${{ secrets.ORGANIZERRO_PAT != '' && secrets.ORGANIZERRO_PAT || github.token }}
+        shell: bash
+        run: |
+          # Delete any previous release for this tag (handles re-runs).
+          gh release delete "${{ steps.version.outputs.tag }}" --yes 2>/dev/null || true
+          git push origin ":refs/tags/${{ steps.version.outputs.tag }}" 2>/dev/null || true
+          gh release create "${{ steps.version.outputs.tag }}" \
+            kodi-windows-x86.zip \
+            --title "Kodi ${{ steps.version.outputs.tag }}" \
+            --notes "${{ steps.notes.outputs.body }}" \
+            --target "${{ github.sha }}"
