@@ -184,15 +184,20 @@ The `python27.dll` itself must be beside `kodi.exe` (not inside `system/Python/`
 ### 5a. Dependency packages (mirrors.kodi.tv)
 
 `tools/buildsteps/windows/download-dependencies.bat` downloads packages listed in
-`project/BuildDependencies/scripts/0_package.list` and extracts them to
-`project/BuildDependencies/win32/`.
+`project/BuildDependencies/scripts/0_package.native-win32.list` (build tools) and
+`project/BuildDependencies/scripts/0_package.target-win32.list` (runtime libraries)
+and extracts them to `project/BuildDependencies/win32/`.
 
-The **Leia-era packages** use this internal structure:
-- `lib/` — static/import libraries (`.lib`)
-- `include/` — headers
-- `system/` — runtime DLLs (extracted to source tree's `system/`)
-- `project/Win32BuildSetup/dependencies/` — `python27.dll` specifically
-- `bin/Python/` — Python 2.7 runtime directory
+The `get_formed.cmd` script **re-arranges** old-format packages during extraction:
+- `project/BuildDependencies/lib/` → `lib/` (flattened)
+- `system/*.dll` → `bin/*.dll` (DLLs moved to bin directory)
+- `Win32/` or `x64/` → flattened to root
+
+After extraction and re-arrangement, the flat structure is:
+- `project/BuildDependencies/win32/lib/` — static/import libraries (`.lib`)
+- `project/BuildDependencies/win32/include/` — headers
+- `project/BuildDependencies/win32/bin/` — runtime DLLs (`.dll`) and Python runtime
+- `project/BuildDependencies/tools/` — native build tools (doxygen, swig, etc.)
 
 ### 5b. CMake export-files target
 
@@ -211,10 +216,11 @@ The "Package release zip" step creates `kodi-windows-x86.zip` from the staging d
 
 ## 6. Known issues and fixes (as of this writing)
 
-| Issue | Root cause | Fix |
+| Issue | Root cause | Fix applied |
 |---|---|---|
-| `python27.dll` missing from release zip | `cmake/installdata/windows/dlls.txt` uses newer `bin/*.dll` path but Leia packages put DLLs in `system/` | Updated `dlls.txt` to use Leia paths |
-| All dependency DLLs missing | Same as above | Same fix |
-| `system/` directory not preserved in zip | `Compress-Archive -Path "system\*"` flattens the container | Changed packaging to use proper staging directory |
-| `media/`, `userdata/` missing | "Collect" step only copied `RelWithDebInfo/` content | Fixed to copy full build tree output |
-| Python directory missing | `python.txt` expected `bin/Python` but Leia packages use different path | Updated `python.txt` for Leia format |
+| Dependency DLLs missing from build | `get_formed.cmd` on our branch was outdated — didn't re-arrange old packages | Synced `get_formed.cmd` from Leia branch (moves `system/*.dll` → `bin/*.dll`) |
+| Wrong package lists used | Old `get_formed.cmd` read `0_package.list`; new one reads `0_package.native-*.list` + `0_package.target-*.list` | Updated `get_formed.cmd` and package list files |
+| `WGET` variable not set | `download-dependencies.bat` was missing `SET WGET=%BUILD_DEPS_PATH%\bin\wget` | Synced `download-dependencies.bat` from Leia branch |
+| `libdvdnav.dll` not in build tree | cmake ExternalProject installs to `kodi-build/build/libdvd/bin/` but `FindLibDvd.cmake` copies from `${DEPENDS_PATH}/bin/` | Added fallback copy in workflow collect step |
+| `/D_CRT_NONSTDC_NO_DEPRECATE` missing | CFlagOverrides.cmake/CXXFlagOverrides.cmake didn't include it | Added to both override files |
+| Binary addons not in release zip | Addon binaries built to `project/Win32BuildSetup/BUILD_WIN32/addons/` not merged into staging | Collect step now merges addon binaries into `staging/addons/` |
