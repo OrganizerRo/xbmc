@@ -68,7 +68,7 @@ CMake's `export-files` target copies them to the build-tree directory beside `ko
 
 | DLL | Source package | Purpose |
 |---|---|---|
-| `python27.dll` | python-2.7.13-win32-vc140 | Python 2.7 runtime (statically linked via `python27.lib`) |
+| `python27.dll` | python-2.7.13-win32-vc140 | Python 2.7 runtime (dynamically linked via import lib `python27.lib`) |
 | `sqlite3.dll` | sqlite-3.10.2-win32-vc140 | SQLite database (**delay-loaded**) |
 | `dnssd.dll` | dnssd-765.50.9-win32-vc140 | Bonjour / mDNS discovery (**delay-loaded**) |
 | `libxslt.dll` | libxslt-1.1.29-win32-vc140 | XSLT transforms (**delay-loaded**) |
