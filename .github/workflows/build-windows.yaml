@@ -374,19 +374,50 @@ jobs:
           if-no-files-found: warn
 
       # Collect all build output into a single staging directory that mirrors
-      # the final on-disk layout.  The CMake export-files target already
-      # copied dependency DLLs, Python, system/ data, addons, media, and
-      # userdata into kodi-build/RelWithDebInfo/ during the build.
+      # the final on-disk layout.
+      #
+      # With Visual Studio multi-config generators, CMake places executables
+      # in kodi-build/<Config>/ (e.g. kodi-build/RelWithDebInfo/kodi.exe),
+      # but the export-files target copies dependency DLLs, Python, system/,
+      # addons/, media/, and userdata/ to the build ROOT (kodi-build/).
+      # We must collect from both locations.
       - name: Collect build output into staging directory
         if: success()
         shell: pwsh
         run: |
           $staging = "$env:GITHUB_WORKSPACE\staging"
+          $buildRoot = "$env:GITHUB_WORKSPACE\kodi-build"
+          $configDir = "$buildRoot\RelWithDebInfo"
           New-Item -ItemType Directory -Force $staging | Out-Null
-          # 1. Copy the entire build tree output (kodi.exe, DLLs, system/, addons/, media/, userdata/)
-          Copy-Item -Path "kodi-build\RelWithDebInfo\*" -Destination $staging -Recurse -Force
-          Write-Host "Copied build tree output to staging"
-          # 2. Merge binary addon build output (PVR, audiodecoder, etc.) into addons/
+
+          # 1. Copy kodi.exe and its PDB from the config-specific directory
+          Copy-Item -Path "$configDir\kodi.exe" -Destination $staging -Force
+          if (Test-Path "$configDir\kodi.pdb") {
+            Copy-Item -Path "$configDir\kodi.pdb" -Destination $staging -Force
+          }
+          Write-Host "Copied kodi.exe from $configDir"
+
+          # 2. Copy dependency DLLs from build root (where export-files placed them)
+          $rootDlls = Get-ChildItem $buildRoot -Filter "*.dll" -File -ErrorAction SilentlyContinue
+          if ($rootDlls) {
+            $rootDlls | Copy-Item -Destination $staging -Force
+            Write-Host "Copied $($rootDlls.Count) DLLs from build root"
+          }
+          # Also copy .jar files (libbluray Java support)
+          Get-ChildItem $buildRoot -Filter "*.jar" -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $staging -Force
+
+          # 3. Copy data directories from build root (system/, addons/, media/, userdata/, sounds/)
+          foreach ($dir in @("system", "addons", "media", "userdata", "sounds")) {
+            $src = Join-Path $buildRoot $dir
+            if (Test-Path $src) {
+              $dst = Join-Path $staging $dir
+              Copy-Item -Path $src -Destination $dst -Recurse -Force
+              Write-Host "Copied $dir/ from build root"
+            }
+          }
+
+          # 4. Merge binary addon build output (PVR, audiodecoder, etc.) into addons/
           $addonSrc = "project\Win32BuildSetup\BUILD_WIN32\addons"
           if (Test-Path $addonSrc) {
             $addonDst = Join-Path $staging "addons"
@@ -396,7 +427,8 @@ jobs:
           } else {
             Write-Host "::warning::Binary addon build output not found at $addonSrc"
           }
-          # 3. Copy libdvdnav.dll if the export-files target missed it.
+
+          # 5. Copy libdvdnav.dll if the export-files target missed it.
           #    The cmake ExternalProject installs it to kodi-build/build/libdvd/bin/
           #    but FindLibDvd.cmake expects it at DEPENDS_PATH/bin/ which may not match.
           $dvdnav = "kodi-build\build\libdvd\bin\libdvdnav.dll"
@@ -404,7 +436,8 @@ jobs:
             Copy-Item $dvdnav -Destination $staging -Force
             Write-Host "Copied libdvdnav.dll from build tree to staging"
           }
-          # 4. List what we collected
+
+          # 6. List what we collected
           Write-Host "=== Staging directory contents ==="
           Write-Host "Root files:"
           Get-ChildItem $staging -File | ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }

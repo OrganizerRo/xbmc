@@ -101,7 +101,7 @@ CALL :setSubStageName Re-arrange old-formed package %1 if necessary...
 :: move project\BuildDependencies\*.* to root
 dir /A:D "%~n1\project" >NUL 2>NUL && (
 ROBOCOPY "%~n1\project\BuildDependencies\\" "%~n1\\" *.* /E /MOVE /njh /njs /ndl /nc /ns /nfl >NUL 2>NUL
-dir /:D "%~n1\project\BuildDependencies" >NUL 2>NUL && (ECHO %1^|Failed to re-arrange package contents >> %FORMED_FAILED_LIST% && EXIT /B 5)
+dir /A:D "%~n1\project\BuildDependencies" >NUL 2>NUL && (ECHO %1^|Failed to re-arrange package contents >> %FORMED_FAILED_LIST% && EXIT /B 5)
 RD "%~n1\project" /S /Q
 )
 
