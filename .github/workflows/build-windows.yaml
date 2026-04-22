@@ -6,10 +6,10 @@ name: Build Kodi 18leia for Win w/VST2
 on:
   push:
     branches:
-      - Leia
+      - Master
   pull_request:
     branches:
-      - Leia
+      - Master
   # workflow_dispatch has no `branches` key in GitHub's schema; manual runs use the branch selected in the UI.
   workflow_dispatch:
 permissions:
