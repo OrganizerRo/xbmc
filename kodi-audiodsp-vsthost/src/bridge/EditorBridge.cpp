@@ -49,18 +49,28 @@ bool EditorBridge::start(DSPChain* chain)
         m_uiReadyEvent = nullptr;
     }
 
-    // Start pipe thread
+    // Start pipe thread — wait for it to signal that the pipe was created.
+    m_pipeReadyEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+
     m_pipeThread = std::thread([this]() { pipeServerLoop(); });
 
-    // Give the pipe thread time to create the pipe
-    Sleep(50);
-
-    // If the pipe handle is still invalid, startup failed
-    if (m_pipeHandle == INVALID_HANDLE_VALUE)
+    if (m_pipeReadyEvent)
     {
-        m_running = false;
-        return false;
+        DWORD waitResult = WaitForSingleObject(m_pipeReadyEvent, 5000);
+        CloseHandle(m_pipeReadyEvent);
+        m_pipeReadyEvent = nullptr;
+
+        if (waitResult != WAIT_OBJECT_0)
+        {
+            // Timed out or the wait itself failed — treat as startup failure.
+            m_running = false;
+            return false;
+        }
     }
+
+    // pipeServerLoop() sets m_running = false when CreateNamedPipe fails.
+    if (!m_running.load())
+        return false;
 
     return true;
 }
@@ -129,8 +139,15 @@ void EditorBridge::pipeServerLoop()
             "[EditorBridge] FATAL: CreateNamedPipe failed: %lu\n",
             GetLastError());
         m_running = false;
+        // Signal start() so it does not block for the full 5-second timeout.
+        if (m_pipeReadyEvent)
+            SetEvent(m_pipeReadyEvent);
         return;
     }
+
+    // Notify start() that the pipe handle is valid and ready for connections.
+    if (m_pipeReadyEvent)
+        SetEvent(m_pipeReadyEvent);
 
     while (m_running.load())
     {
@@ -283,8 +300,16 @@ void EditorBridge::uiThreadLoop()
 
     m_windowClass = RegisterClassExW(&wc);
 
-    // Create a message-only window to receive thread messages
     m_uiThreadID = GetCurrentThreadId();
+
+    // Force creation of the Win32 message queue on this thread BEFORE
+    // signalling m_uiReadyEvent.  PostThreadMessageW() fails silently if the
+    // target thread has not yet created its queue (which happens lazily on the
+    // first call to a message function).  PeekMessage() creates the queue
+    // without blocking, so any PostThreadMessageW() call that arrives after
+    // the event is signalled is guaranteed to reach GetMessageW() below.
+    MSG dummy{};
+    PeekMessageW(&dummy, nullptr, 0, 0, PM_NOREMOVE);
 
     // Signal that the UI thread is ready
     if (m_uiReadyEvent)
