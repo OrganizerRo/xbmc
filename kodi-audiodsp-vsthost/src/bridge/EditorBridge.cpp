@@ -27,10 +27,10 @@ EditorBridge::~EditorBridge()
 // start / stop
 // ============================================================================
 
-void EditorBridge::start(DSPChain* chain)
+bool EditorBridge::start(DSPChain* chain)
 {
     if (m_running.load())
-        return;
+        return true;
 
     {
         std::lock_guard<std::mutex> lock(m_editorMutex);
@@ -38,13 +38,10 @@ void EditorBridge::start(DSPChain* chain)
     }
     m_running = true;
 
-    // Create an event to wait for the UI thread to become ready
     m_uiReadyEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 
-    // Start UI thread first so it can register the window class
     m_uiThread = std::thread([this]() { uiThreadLoop(); });
 
-    // Wait for the UI thread to signal readiness (up to 5 seconds)
     if (m_uiReadyEvent)
     {
         WaitForSingleObject(m_uiReadyEvent, 5000);
@@ -52,8 +49,20 @@ void EditorBridge::start(DSPChain* chain)
         m_uiReadyEvent = nullptr;
     }
 
-    // Start pipe server thread
+    // Start pipe thread
     m_pipeThread = std::thread([this]() { pipeServerLoop(); });
+
+    // Give the pipe thread time to create the pipe
+    Sleep(50);
+
+    // If the pipe handle is still invalid, startup failed
+    if (m_pipeHandle == INVALID_HANDLE_VALUE)
+    {
+        m_running = false;
+        return false;
+    }
+
+    return true;
 }
 
 void EditorBridge::stop()
@@ -104,47 +113,40 @@ void EditorBridge::setChain(DSPChain* chain)
 
 void EditorBridge::pipeServerLoop()
 {
+    m_pipeHandle = CreateNamedPipeW(
+        PIPE_NAME,
+        PIPE_ACCESS_DUPLEX,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+        1,
+        4096,
+        4096,
+        0,
+        nullptr);
+
+    if (m_pipeHandle == INVALID_HANDLE_VALUE)
+    {
+        std::fprintf(stderr,
+            "[EditorBridge] FATAL: CreateNamedPipe failed: %lu\n",
+            GetLastError());
+        m_running = false;
+        return;
+    }
+
     while (m_running.load())
     {
-        m_pipeHandle = CreateNamedPipeW(
-            PIPE_NAME,
-            PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-            1,          // max instances
-            4096,       // out buffer
-            4096,       // in buffer
-            0,          // default timeout
-            nullptr);   // default security
-
-        if (m_pipeHandle == INVALID_HANDLE_VALUE)
-        {
-            std::fprintf(stderr, "[EditorBridge] CreateNamedPipe failed: %lu\n",
-                         GetLastError());
-            Sleep(1000);
-            continue;
-        }
-
-        // Block until a client connects
         BOOL connected = ConnectNamedPipe(m_pipeHandle, nullptr);
         DWORD err = GetLastError();
 
         if (!connected && err != ERROR_PIPE_CONNECTED)
-        {
-            // ConnectNamedPipe was cancelled (stop() called) or failed
-            CloseHandle(m_pipeHandle);
-            m_pipeHandle = INVALID_HANDLE_VALUE;
             continue;
-        }
 
-        // Handle client
         handleClient(m_pipeHandle);
 
         FlushFileBuffers(m_pipeHandle);
         DisconnectNamedPipe(m_pipeHandle);
-        CloseHandle(m_pipeHandle);
-        m_pipeHandle = INVALID_HANDLE_VALUE;
     }
 }
+
 
 void EditorBridge::handleClient(HANDLE pipe)
 {
