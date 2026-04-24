@@ -33,11 +33,31 @@
 #include "kodi_adsp_types.h"
 
 #include <cstring>
+#include <windows.h>
 
 using namespace ADDON;
 
 namespace ActiveAE
 {
+
+// ---------------------------------------------------------------------------
+// Log bridge — forwards addon log messages into kodi.log via CLog::Log.
+// Severity constants match VSTLog.h (0=DEBUG, 1=INFO, 2=WARN, 3=ERROR).
+// This is a plain C function so it can be passed as a function pointer to
+// the addon's ADDON_SetLogCallback export.
+// ---------------------------------------------------------------------------
+
+static void vstLogBridge(int level, const char* msg)
+{
+    switch (level)
+    {
+    case 0:  CLog::Log(LOGDEBUG,   "{}", msg); break;
+    case 1:  CLog::Log(LOGINFO,    "{}", msg); break;
+    case 2:  CLog::Log(LOGWARNING, "{}", msg); break;
+    case 3:  CLog::Log(LOGERROR,   "{}", msg); break;
+    default: CLog::Log(LOGDEBUG,   "{}", msg); break;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Construction / destruction
@@ -109,6 +129,61 @@ bool CActiveAEDSP::Init()
   // Fill the function-pointer table via get_addon().
   std::memset(m_funcs, 0, sizeof(AudioDSP));
   m_dll->GetAddon(m_funcs);
+
+  // Register our log bridge so the addon's internal messages (VSTLog) appear
+  // in kodi.log.  The addon exports ADDON_SetLogCallback as a plain extern "C"
+  // function; we look it up via GetModuleHandleW + GetProcAddress rather than
+  // adding it to the DllAddon wrapper, so that non-VST addons are unaffected.
+  {
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, nullptr, 0);
+    if (wlen > 0)
+    {
+      std::wstring wlibPath(static_cast<size_t>(wlen), L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, &wlibPath[0], wlen);
+
+      HMODULE hmod = GetModuleHandleW(wlibPath.c_str());
+      if (hmod)
+      {
+        // VSTLog.h is an addon-internal header and is not on Kodi's include path,
+        // so we declare the callback signature locally rather than including it.
+        // The signature must stay in sync with VSTLogCallback in VSTLog.h:
+        //   void (*)(int level, const char* msg)
+        // ADDON_SetLogCallback is a setter that *accepts* a callback pointer,
+        // so its signature is: void ADDON_SetLogCallback(VSTLogCallback_t cb)
+        using VSTLogCallback_t = void (*)(int level, const char* msg);
+        using ADDON_SetLogCallback_t = void (*)(VSTLogCallback_t cb);
+        auto setLog = reinterpret_cast<ADDON_SetLogCallback_t>(
+            GetProcAddress(hmod, "ADDON_SetLogCallback"));
+
+        if (setLog)
+        {
+          setLog(vstLogBridge);
+          CLog::Log(LOGDEBUG,
+                    "CActiveAEDSP::Init — log callback registered; addon messages will appear in kodi.log");
+        }
+        else
+        {
+          CLog::Log(LOGWARNING,
+                    "CActiveAEDSP::Init — ADDON_SetLogCallback not found in '{}'; "
+                    "addon log messages will not appear in kodi.log",
+                    libPath);
+        }
+      }
+      else
+      {
+        CLog::Log(LOGWARNING,
+                  "CActiveAEDSP::Init — GetModuleHandleW failed for '{}' (error {}); "
+                  "cannot register log callback",
+                  libPath, GetLastError());
+      }
+    }
+    else
+    {
+      CLog::Log(LOGWARNING,
+                "CActiveAEDSP::Init — MultiByteToWideChar failed for '{}' (error {})",
+                libPath, GetLastError());
+    }
+  }
 
   // Prepare user-data and add-on-path strings (must outlive ADDON_Create call).
   const std::string specialPath = "special://profile/addon_data/" + addon->ID() + "/";
