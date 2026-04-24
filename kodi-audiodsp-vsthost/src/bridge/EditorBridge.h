@@ -33,7 +33,7 @@ public:
 
     /// Start the pipe server and UI thread.
     /// @param chain  Pointer to the active DSPChain — used to look up plugins.
-    void start(DSPChain* chain);
+    bool start(DSPChain* chain);
 
     /// Stop the pipe server and close all editor windows.
     void stop();
