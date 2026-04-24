@@ -21,7 +21,7 @@ cmake --build build --config Release
 ```
 
 The VST3 SDK is fetched automatically via FetchContent, or you can place it in `deps/vst3sdk/`.
-
+doesnt work
 ## Configuration
 
 All configuration lives in the addon's **data directory**:
