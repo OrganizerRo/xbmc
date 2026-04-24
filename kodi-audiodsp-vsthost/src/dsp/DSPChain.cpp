@@ -6,6 +6,7 @@
 #include "DSPChain.h"
 #include "../vst2/VSTPlugin2.h"
 #include "../util/JsonUtil.h"
+#include "../util/VSTLog.h"
 
 #include <algorithm>
 #include <cstring>
@@ -31,9 +32,9 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
     if (format != IVSTPlugin::PluginFormat::VST2)
     {
         const char* formatName = (format == IVSTPlugin::PluginFormat::VST3) ? "vst3" : "unknown";
-        std::fprintf(stderr,
-            "[DSPChain] addPlugin: unsupported format '%s' for '%s' (VST2 only)\n",
-            formatName, path.c_str());
+        VSTLog(VSTLOG_ERROR,
+               "[DSPChain] addPlugin: unsupported format '%s' for '%s' (VST2 only)",
+               formatName, path.c_str());
         return false;
     }
 
@@ -47,13 +48,13 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
         if (!slot.plugin->load(m_sampleRate, m_blockSize, m_numChannels))
         {
             // Log but do not abort — caller decides whether to retry
-            std::fprintf(stderr,
-                "[DSPChain] addPlugin: failed to load '%s'\n", path.c_str());
+            VSTLog(VSTLOG_ERROR, "[DSPChain] addPlugin: failed to load '%s'", path.c_str());
             return false;
         }
     }
 
     m_plugins.push_back(std::move(slot));
+    VSTLog(VSTLOG_DEBUG, "[DSPChain] addPlugin: added '%s'", path.c_str());
     return true;
 }
 
@@ -112,15 +113,19 @@ bool DSPChain::initialize(double sampleRate, int maxBlockSize, int numChannels)
     {
         if (!slot.plugin->load(m_sampleRate, m_blockSize, m_numChannels))
         {
-            std::fprintf(stderr,
-                "[DSPChain] initialize: failed to load plugin '%s'\n",
-                slot.path.c_str());
+            VSTLog(VSTLOG_ERROR,
+                   "[DSPChain] initialize: failed to load plugin '%s'",
+                   slot.path.c_str());
             allOk = false;
             // Continue — remaining plugins still get a chance to load.
         }
     }
 
     m_initialized = true;
+    VSTLog(VSTLOG_INFO,
+           "[DSPChain] Initialized — %.0f Hz, %d ch, %d frame block, %d plugin(s)",
+           m_sampleRate, m_numChannels, m_blockSize,
+           static_cast<int>(m_plugins.size()));
     return allOk;
 }
 
@@ -167,10 +172,10 @@ static int logSlotCrashAndEscalate(EXCEPTION_POINTERS* ep, const char* pluginPat
     const unsigned code = (ep && ep->ExceptionRecord)
         ? static_cast<unsigned>(ep->ExceptionRecord->ExceptionCode)
         : 0u;
-    std::fprintf(stderr,
-        "[DSPChain] plugin crashed (SEH 0x%08X) — escalating to disable all DSP: %s\n",
-        code,
-        pluginPath ? pluginPath : "<unknown>");
+    VSTLog(VSTLOG_ERROR,
+           "[DSPChain] plugin crashed (SEH 0x%08X) — escalating to disable all DSP: %s",
+           code,
+           pluginPath ? pluginPath : "<unknown>");
     return EXCEPTION_CONTINUE_SEARCH;  // propagate → caught by Layer 2
 }
 
@@ -508,9 +513,9 @@ bool DSPChain::deserializeFromJson(const std::string& json)
 
         if (formatStr != "vst2")
         {
-            std::fprintf(stderr,
-                "[DSPChain] deserializeFromJson: unsupported format '%s' for '%s' (VST2 only)\n",
-                formatStr.c_str(), pathStr.c_str());
+            VSTLog(VSTLOG_WARNING,
+                   "[DSPChain] deserializeFromJson: unsupported format '%s' for '%s' (VST2 only)",
+                   formatStr.c_str(), pathStr.c_str());
             pos = objEnd + 1;
             continue;
         }
@@ -519,9 +524,9 @@ bool DSPChain::deserializeFromJson(const std::string& json)
 
         if (!addPlugin(pathStr, fmt))
         {
-            std::fprintf(stderr,
-                "[DSPChain] deserializeFromJson: failed to add plugin '%s'\n",
-                pathStr.c_str());
+            VSTLog(VSTLOG_ERROR,
+                   "[DSPChain] deserializeFromJson: failed to add plugin '%s'",
+                   pathStr.c_str());
             pos = objEnd + 1;
             continue;
         }

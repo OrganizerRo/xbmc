@@ -11,8 +11,20 @@
 #include "addon_main.h"
 #include "dsp/DSPProcessor.h"
 #include "bridge/EditorBridge.h"
+#include "util/VSTLog.h"
 #include <string>
 #include <cstring>
+
+// ---------------------------------------------------------------------------
+// Log callback export — called once by CActiveAEDSP::Init() immediately
+// after loading this DLL so that addon log messages appear in kodi.log.
+// extern "C" prevents C++ name mangling; WINDOWS_EXPORT_ALL_SYMBOLS in
+// CMakeLists.txt then exports it as "ADDON_SetLogCallback".
+// ---------------------------------------------------------------------------
+extern "C" void ADDON_SetLogCallback(VSTLogCallback cb)
+{
+    VSTLog_SetCallback(cb);
+}
 
 // ---------------------------------------------------------------------------
 // Global state — set once in ADDON_Create, read by every StreamCreate.
@@ -58,22 +70,27 @@ ADDON_STATUS ADDON_Create(void* hdl, void* props)
     if (dspProps && dspProps->strUserPath)
         g_addonDataPath = dspProps->strUserPath;
 
+    VSTLog(VSTLOG_INFO, "[VSTHost] ADDON_Create — user path: %s",
+           g_addonDataPath.empty() ? "(none)" : g_addonDataPath.c_str());
+
     // Start editor bridge
     if (!g_editorBridge.isRunning())
     {
         if (!g_editorBridge.start(nullptr))
         {
-            std::fprintf(stderr,
-                "[VSTHost] ERROR: Failed to start named pipe server\n");
+            VSTLog(VSTLOG_ERROR,
+                "[VSTHost] ADDON_Create — failed to start named pipe server");
             return ADDON_STATUS_PERMANENT_FAILURE;
         }
+        VSTLog(VSTLOG_INFO, "[VSTHost] ADDON_Create — named pipe server started");
     }
-    
+
     return ADDON_STATUS_OK;
 }
 
 void ADDON_Destroy()
 {
+    VSTLog(VSTLOG_INFO, "[VSTHost] ADDON_Destroy — stopping editor bridge");
     // Stop the editor bridge — no more streams will come.
     g_editorBridge.stop();
     g_lastProcessor = nullptr;
@@ -201,6 +218,7 @@ AE_DSP_ERROR StreamCreate(const AE_DSP_SETTINGS* addonSettings,
 
     if (!proc->streamCreate(addonSettings))
     {
+        VSTLog(VSTLOG_ERROR, "[VSTHost] StreamCreate — DSPProcessor::streamCreate failed");
         delete proc;
         return AE_DSP_ERROR_FAILED;
     }
@@ -225,6 +243,8 @@ AE_DSP_ERROR StreamDestroy(const ADDON_HANDLE handle)
     DSPProcessor* proc = GetProc(handle);
     if (!proc)
         return AE_DSP_ERROR_INVALID_PARAMETERS;
+
+    VSTLog(VSTLOG_INFO, "[VSTHost] StreamDestroy — stream %d", proc->getStreamID());
 
     // Detach the chain from the editor bridge so subsequent "open" commands
     // fail gracefully until the next StreamCreate provides a new chain.

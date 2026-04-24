@@ -6,6 +6,7 @@
 
 #include "EditorBridge.h"
 #include "../util/JsonUtil.h"
+#include "../util/VSTLog.h"
 
 #include <cstdio>
 #include <cstring>
@@ -44,7 +45,7 @@ bool EditorBridge::start(DSPChain* chain)
 
     if (m_uiReadyEvent)
     {
-        WaitForSingleObject(m_uiReadyEvent, 5000);
+        WaitForSingleObject(m_uiReadyEvent, STARTUP_TIMEOUT_MS);
         CloseHandle(m_uiReadyEvent);
         m_uiReadyEvent = nullptr;
     }
@@ -56,7 +57,7 @@ bool EditorBridge::start(DSPChain* chain)
 
     if (m_pipeReadyEvent)
     {
-        DWORD waitResult = WaitForSingleObject(m_pipeReadyEvent, 5000);
+        DWORD waitResult = WaitForSingleObject(m_pipeReadyEvent, STARTUP_TIMEOUT_MS);
         CloseHandle(m_pipeReadyEvent);
         m_pipeReadyEvent = nullptr;
 
@@ -72,6 +73,8 @@ bool EditorBridge::start(DSPChain* chain)
     if (!m_running.load())
         return false;
 
+    VSTLog(VSTLOG_INFO,
+           "[EditorBridge] Started — pipe: \\\\.\\pipe\\kodi_vsthost_editor");
     return true;
 }
 
@@ -135,9 +138,8 @@ void EditorBridge::pipeServerLoop()
 
     if (m_pipeHandle == INVALID_HANDLE_VALUE)
     {
-        std::fprintf(stderr,
-            "[EditorBridge] FATAL: CreateNamedPipe failed: %lu\n",
-            GetLastError());
+        VSTLog(VSTLOG_ERROR,
+               "[EditorBridge] CreateNamedPipe failed: %lu", GetLastError());
         m_running = false;
         // Signal start() so it does not block for the full 5-second timeout.
         if (m_pipeReadyEvent)
@@ -315,6 +317,8 @@ void EditorBridge::uiThreadLoop()
     if (m_uiReadyEvent)
         SetEvent(m_uiReadyEvent);
 
+    VSTLog(VSTLOG_INFO, "[EditorBridge] UI thread ready (threadID: %lu)", m_uiThreadID);
+
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0))
     {
@@ -438,16 +442,18 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
 
     if (!hwnd)
     {
-        std::fprintf(stderr, "[EditorBridge] CreateWindowExW failed: %lu\n",
-                     GetLastError());
+        VSTLog(VSTLOG_ERROR,
+               "[EditorBridge] CreateWindowExW failed for '%s': %lu",
+               pluginPath.c_str(), GetLastError());
         return;
     }
 
     // Open the VST editor inside our window (also attaches the VST3 view)
     if (!plugin->openEditor(static_cast<void*>(hwnd)))
     {
-        std::fprintf(stderr, "[EditorBridge] plugin->openEditor() failed for '%s'\n",
-                     pluginPath.c_str());
+        VSTLog(VSTLOG_ERROR,
+               "[EditorBridge] plugin->openEditor() failed for '%s'",
+               pluginPath.c_str());
         DestroyWindow(hwnd);
         return;
     }
@@ -477,6 +483,9 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
 
     // Start idle timer for VST2 editors
     SetTimer(hwnd, EDITOR_IDLE_TIMER, EDITOR_IDLE_MS, nullptr);
+
+    VSTLog(VSTLOG_INFO, "[EditorBridge] Editor window opened for '%s'",
+           pluginPath.c_str());
 
     // Show the window
     ShowWindow(hwnd, SW_SHOW);

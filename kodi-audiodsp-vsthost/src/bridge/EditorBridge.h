@@ -99,6 +99,8 @@ private:
     static constexpr UINT WM_VSTBRIDGE_QUIT   = WM_USER + 102;
     static constexpr UINT EDITOR_IDLE_TIMER   = 1;
     static constexpr UINT EDITOR_IDLE_MS      = 30;
+    /// Maximum milliseconds to wait for the UI thread or pipe thread to start.
+    static constexpr DWORD STARTUP_TIMEOUT_MS = 5000;
 
     DSPChain*           m_chain = nullptr;
     std::atomic<bool>   m_running{false};
