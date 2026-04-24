@@ -19,8 +19,12 @@ on:
       - 'kodi-audiodsp-vsthost/**'
       - 'addons/plugin.audio.vstmanager/**'
       - '.github/workflows/build-vst-addons.yaml'
-  workflow_dispatch:
-
+   workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Target environment'
+        required: true
+        default: 'Leia' 
 permissions:
   contents: write
 
