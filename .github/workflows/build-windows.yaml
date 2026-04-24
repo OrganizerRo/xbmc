@@ -12,6 +12,11 @@ on:
       - Master
   # workflow_dispatch has no `branches` key in GitHub's schema; manual runs use the branch selected in the UI.
   workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Target environment'
+        required: true
+        default: 'Leia'  
 permissions:
   contents: write
 
