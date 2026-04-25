@@ -762,7 +762,6 @@ bool CApplication::Initialize()
 
   // Init DPMS, before creating the corresponding setting control.
   m_dpms.reset(new DPMSSupport());
-  bool uiInitializationFinished = false;
   if (CServiceBroker::GetGUI()->GetWindowManager().Initialized())
   {
     const std::shared_ptr<CSettings> settings = CServiceBroker::GetSettingsComponent()->GetSettings();
@@ -834,14 +833,7 @@ bool CApplication::Initialize()
       {
         CLog::Log(LOGWARNING, "CApplication::Initialize - startup.xml taints init process");
       }
-
-      // the startup window is considered part of the initialization as it most likely switches to the final window
-      uiInitializationFinished = firstWindow != WINDOW_STARTUP_ANIM;
     }
-  }
-  else //No GUI Created
-  {
-    uiInitializationFinished = true;
   }
 
   CJSONRPC::Initialize();
@@ -878,8 +870,19 @@ bool CApplication::Initialize()
   // reset our screensaver (starts timers etc.)
   ResetScreenSaver();
 
-  // if the user interfaces has been fully initialized let everyone know
-  if (uiInitializationFinished)
+  // All stage-3 services are ready at this point, so always notify the UI.
+  // When Startup.xml is the first window (uiInitializationFinished == false) it
+  // fires a navigation action (e.g. ReplaceWindow) from its <onload> handler.
+  // That action is deferred into m_deferredActions because m_bInitializing is
+  // still true.  The deferred actions are replayed only in response to
+  // GUI_MSG_UI_READY (handled in OnMessage).  CGUIWindowStartup::OnDeinitWindow
+  // was supposed to send that message, but it can never fire because the
+  // navigation action that would close the window is itself deferred – a
+  // deadlock.  Sending GUI_MSG_UI_READY unconditionally here breaks the cycle:
+  // the deferred ReplaceWindow executes, Startup.xml exits, and the subsequent
+  // OnDeinitWindow call sends a second GUI_MSG_UI_READY which is harmless
+  // (Delete on an already-removed splash window is a no-op, m_deferredActions
+  // will be empty, and ShowAppMigrationMessage is idempotent).
   {
     CGUIMessage msg(GUI_MSG_NOTIFY_ALL, 0, 0, GUI_MSG_UI_READY);
     CServiceBroker::GetGUI()->GetWindowManager().SendThreadMessage(msg);
