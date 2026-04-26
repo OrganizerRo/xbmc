@@ -114,6 +114,12 @@ public:
     /// Direct access to a plugin slot (nullptr if out of range).
     IVSTPlugin* getPlugin(int index);
 
+    /// Recovery settings loaded from the "settings" block of chain.json.
+    /// These are forwarded to CActiveAEDSP via ADDON_GetRecoveryParams so that
+    /// the Kodi-side recovery timer honours per-chain configuration.
+    int getRecoveryDelayMs()     const { return m_recoveryDelayMs; }
+    int getMaxRecoveryAttempts() const { return m_maxRecoveryAttempts; }
+
 private:
     std::vector<ChainPlugin> m_plugins;
 
@@ -121,6 +127,11 @@ private:
     int    m_blockSize   = 1024;
     int    m_numChannels = 2;
     bool   m_initialized = false;
+
+    /// Recovery timer settings — read from chain.json "settings" block.
+    /// Defaults match the hard-coded Kodi-side fallbacks in CActiveAEDSP.
+    int m_recoveryDelayMs     = 30000;  ///< ms to wait before auto-reload after a crash
+    int m_maxRecoveryAttempts = 3;      ///< max number of reload attempts per plugin load
 
     // Ping-pong scratch buffers — allocated once in initialize(), never in process().
     std::vector<std::vector<float>> m_bufA;   // channel scratch — "A" side

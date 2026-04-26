@@ -81,6 +81,11 @@ public:
     int getNumChannels() const { return m_numChannels; }
     int getStreamID()    const { return m_streamID;    }
 
+    /// Recovery settings forwarded from the chain.json "settings" block.
+    /// Available after loadConfig() has been called (i.e. after streamCreate()).
+    int getRecoveryDelayMs()     const { return m_chain.getRecoveryDelayMs(); }
+    int getMaxRecoveryAttempts() const { return m_chain.getMaxRecoveryAttempts(); }
+
 private:
     DSPChain    m_chain;
     std::string m_configPath;

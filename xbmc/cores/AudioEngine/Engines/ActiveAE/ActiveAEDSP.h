@@ -30,6 +30,7 @@
 #include "cores/AudioEngine/Utils/AEAudioFormat.h"
 
 #include <atomic>
+#include <chrono>
 #include <vector>
 
 // Forward-declare legacy ADSP types so we avoid pulling in Windows headers in
@@ -82,6 +83,21 @@ public:
   /// Returns true if the add-on was loaded successfully and has not crashed.
   bool IsActive() const;
 
+  // -------------------------------------------------------------------------
+  // Crash recovery — Layer 3 of §8
+  // -------------------------------------------------------------------------
+
+  /// Returns true when a DSP crash has been detected and the recovery delay
+  /// (read from chain.json "settings".recovery_delay_ms) has elapsed.
+  /// Cheap: only atomics + a steady_clock read.  Safe on any thread.
+  bool NeedsReset() const;
+
+  /// Tear down and reload the add-on DLL, then re-initialize the stream.
+  /// Must only be called from the AE worker thread (same thread as Init/Configure).
+  /// @param fmt  The current internal audio format — passed to OnConfigure() on success.
+  /// @return true if recovery succeeded; false if max attempts exceeded or reload failed.
+  bool TryReset(const AEAudioFormat& fmt);
+
 private:
 #ifdef TARGET_WINDOWS
   void StreamCreate(const AEAudioFormat& fmt);
@@ -95,6 +111,19 @@ private:
   bool             m_streamActive = false;
   bool             m_initialized  = false;
   std::atomic<bool> m_dspFailed{false};
+
+  // -------------------------------------------------------------------------
+  // Recovery state (§8 Layer 3)
+  // m_dspNeedsReset and m_failedAt are written by the render thread and read
+  // by the AE worker thread; both use only atomics / steady_clock, no locks.
+  // m_recoveryAttempts, m_maxRecoveryAttempts, m_recoveryDelayMs are only
+  // touched on the AE worker thread.
+  // -------------------------------------------------------------------------
+  std::atomic<bool>  m_dspNeedsReset{false};     ///< crash flagged; worker thread should TryReset
+  std::atomic<int>   m_recoveryAttempts{0};       ///< crash counter for this DLL load
+  std::chrono::steady_clock::time_point m_failedAt{};  ///< when m_dspFailed was first set
+  int m_maxRecoveryAttempts = 3;   ///< cap on reload attempts; overridden by chain.json
+  int m_recoveryDelayMs     = 30000; ///< ms before first reload attempt; overridden by chain.json
 
   // Scratch buffers for deinterleaving interleaved float input
   // (allocated once in StreamCreate, sized to [channels][frames])

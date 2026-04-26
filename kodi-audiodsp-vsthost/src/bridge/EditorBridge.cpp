@@ -6,6 +6,7 @@
 
 #include "EditorBridge.h"
 #include "../util/JsonUtil.h"
+#include "../util/VSTLog.h"
 
 #include <cstdio>
 #include <cstring>
@@ -62,6 +63,7 @@ bool EditorBridge::start(DSPChain* chain)
         return false;
     }
 
+    VSTLOG(VSTLOG_INFO, "EditorBridge::start — named pipe server started: \\\\.\\pipe\\kodi_vsthost_editor");
     return true;
 }
 
@@ -69,6 +71,8 @@ void EditorBridge::stop()
 {
     if (!m_running.load())
         return;
+
+    VSTLOG(VSTLOG_INFO, "EditorBridge::stop — shutting down named pipe server: \\\\.\\pipe\\kodi_vsthost_editor");
 
     m_running = false;
 
@@ -125,12 +129,13 @@ void EditorBridge::pipeServerLoop()
 
     if (m_pipeHandle == INVALID_HANDLE_VALUE)
     {
-        std::fprintf(stderr,
-            "[EditorBridge] FATAL: CreateNamedPipe failed: %lu\n",
-            GetLastError());
+        const DWORD pipeErr = GetLastError();
+        VSTLOG(VSTLOG_ERROR, "EditorBridge::pipeServerLoop — CreateNamedPipe failed: %lu", pipeErr);
         m_running = false;
         return;
     }
+
+    VSTLOG(VSTLOG_INFO, "EditorBridge::pipeServerLoop — pipe created: \\\\.\\pipe\\kodi_vsthost_editor, waiting for client...");
 
     while (m_running.load())
     {
@@ -140,10 +145,12 @@ void EditorBridge::pipeServerLoop()
         if (!connected && err != ERROR_PIPE_CONNECTED)
             continue;
 
+        VSTLOG(VSTLOG_DEBUG, "EditorBridge::pipeServerLoop — client connected");
         handleClient(m_pipeHandle);
 
         FlushFileBuffers(m_pipeHandle);
         DisconnectNamedPipe(m_pipeHandle);
+        VSTLOG(VSTLOG_DEBUG, "EditorBridge::pipeServerLoop — client disconnected");
     }
 }
 

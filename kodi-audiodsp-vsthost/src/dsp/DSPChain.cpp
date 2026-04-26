@@ -414,6 +414,10 @@ std::string DSPChain::serializeToJson() const
     ss << "  \"version\": 1,\n";
     ss << "  \"sampleRate\": " << m_sampleRate << ",\n";
     ss << "  \"numChannels\": " << m_numChannels << ",\n";
+    ss << "  \"settings\": {\n";
+    ss << "    \"recovery_delay_ms\": " << m_recoveryDelayMs << ",\n";
+    ss << "    \"max_recovery_attempts\": " << m_maxRecoveryAttempts << "\n";
+    ss << "  },\n";
     ss << "  \"plugins\": [\n";
 
     for (size_t i = 0; i < m_plugins.size(); ++i)
@@ -452,6 +456,31 @@ bool DSPChain::deserializeFromJson(const std::string& json)
 {
     // Clear existing chain before loading.
     clear();
+
+    // Parse optional "settings" block — must happen before the plugin loop so
+    // that recovery params are available to callers immediately after loading.
+    {
+        const std::string settingsKey = "\"settings\"";
+        size_t spos = json.find(settingsKey);
+        if (spos != std::string::npos)
+        {
+            spos = json.find('{', spos + settingsKey.size());
+            if (spos != std::string::npos)
+            {
+                size_t send = json.find('}', spos);
+                if (send != std::string::npos)
+                {
+                    const std::string block = json.substr(spos, send - spos + 1);
+                    int val = 0;
+                    size_t dummy = 0;
+                    if (JsonUtil::extractInt(block, "recovery_delay_ms", 0, val, dummy) && val > 0)
+                        m_recoveryDelayMs = val;
+                    if (JsonUtil::extractInt(block, "max_recovery_attempts", 0, val, dummy) && val > 0)
+                        m_maxRecoveryAttempts = val;
+                }
+            }
+        }
+    }
 
     // Locate the "plugins" array.
     const std::string pluginsKey = "\"plugins\"";
