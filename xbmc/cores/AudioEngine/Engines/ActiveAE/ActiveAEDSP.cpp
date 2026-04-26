@@ -132,60 +132,58 @@ bool CActiveAEDSP::Init()
 
   // Register our log bridge so the addon's internal messages (VSTLog) appear
   // in kodi.log.  The addon exports ADDON_SetLogCallback as a plain extern "C"
-  // function; we look it up via GetModuleHandleW + GetProcAddress rather than
+  // function; we look it up via GetModuleHandleExW + GetProcAddress rather than
   // adding it to the DllAddon wrapper, so that non-VST addons are unaffected.
+  // Use GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS with a known function pointer rather
+  // than GetModuleHandleW(path) to avoid any path-format matching issues.
   {
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, nullptr, 0);
-    if (wlen > 0)
+    HMODULE hmod = nullptr;
+    if (m_funcs->GetDSPName)
     {
-      std::wstring wlibPath(static_cast<size_t>(wlen), L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, &wlibPath[0], wlen);
+      GetModuleHandleExW(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          reinterpret_cast<LPCWSTR>(m_funcs->GetDSPName),
+          &hmod);
+    }
 
-      HMODULE hmod = GetModuleHandleW(wlibPath.c_str());
-      if (hmod)
+    if (hmod)
+    {
+      // VSTLog.h is an addon-internal header and is not on Kodi's include path,
+      // so we declare the callback signature locally rather than including it.
+      // The signature must stay in sync with VSTLogCallback in VSTLog.h:
+      //   void (*)(int level, const char* msg)
+      // ADDON_SetLogCallback is a setter that *accepts* a callback pointer,
+      // so its signature is: void ADDON_SetLogCallback(VSTLogCallback_t cb)
+      using VSTLogCallback_t = void (*)(int level, const char* msg);
+      using ADDON_SetLogCallback_t = void (*)(VSTLogCallback_t cb);
+      auto setLog = reinterpret_cast<ADDON_SetLogCallback_t>(
+          GetProcAddress(hmod, "ADDON_SetLogCallback"));
+
+      if (setLog)
       {
-        // VSTLog.h is an addon-internal header and is not on Kodi's include path,
-        // so we declare the callback signature locally rather than including it.
-        // The signature must stay in sync with VSTLogCallback in VSTLog.h:
-        //   void (*)(int level, const char* msg)
-        // ADDON_SetLogCallback is a setter that *accepts* a callback pointer,
-        // so its signature is: void ADDON_SetLogCallback(VSTLogCallback_t cb)
-        using VSTLogCallback_t = void (*)(int level, const char* msg);
-        using ADDON_SetLogCallback_t = void (*)(VSTLogCallback_t cb);
-        auto setLog = reinterpret_cast<ADDON_SetLogCallback_t>(
-            GetProcAddress(hmod, "ADDON_SetLogCallback"));
-
-        if (setLog)
-        {
-          setLog(vstLogBridge);
-          CLog::Log(LOGDEBUG,
-                    "CActiveAEDSP::Init — log callback registered; addon messages will appear in kodi.log");
-        }
-        else
-        {
-          CLog::Log(LOGWARNING,
-                    "CActiveAEDSP::Init — ADDON_SetLogCallback not found in '{}'; "
-                    "addon log messages will not appear in kodi.log",
-                    libPath);
-        }
-
-        // Query chain.json recovery settings from the addon.
-        // ADDON_Create (called below) pre-loads chain.json, so the actual
-        // GetRecoveryParams call is deferred to after Create() returns.
+        setLog(vstLogBridge);
+        CLog::Log(LOGDEBUG,
+                  "CActiveAEDSP::Init — log callback registered; addon messages will appear in kodi.log");
       }
       else
       {
         CLog::Log(LOGWARNING,
-                  "CActiveAEDSP::Init — GetModuleHandleW failed for '{}' (error {}); "
-                  "cannot register log callback",
-                  libPath, GetLastError());
+                  "CActiveAEDSP::Init — ADDON_SetLogCallback not found in '{}'; "
+                  "addon log messages will not appear in kodi.log",
+                  libPath);
       }
+
+      // Query chain.json recovery settings from the addon.
+      // ADDON_Create (called below) pre-loads chain.json, so the actual
+      // GetRecoveryParams call is deferred to after Create() returns.
     }
     else
     {
       CLog::Log(LOGWARNING,
-                "CActiveAEDSP::Init — MultiByteToWideChar failed for '{}' (error {})",
-                libPath, GetLastError());
+                "CActiveAEDSP::Init — GetModuleHandleExW failed (error {}); "
+                "cannot register log callback",
+                GetLastError());
     }
   }
 
@@ -218,47 +216,43 @@ bool CActiveAEDSP::Init()
   // Now that ADDON_Create has run (and pre-loaded chain.json settings),
   // retrieve the recovery params from the addon via ADDON_GetRecoveryParams.
   {
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, nullptr, 0);
-    if (wlen > 0)
+    HMODULE hmod = nullptr;
+    if (m_funcs->GetDSPName)
     {
-      std::wstring wlibPath(static_cast<size_t>(wlen), L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, &wlibPath[0], wlen);
-      HMODULE hmod = GetModuleHandleW(wlibPath.c_str());
-      if (hmod)
+      GetModuleHandleExW(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          reinterpret_cast<LPCWSTR>(m_funcs->GetDSPName),
+          &hmod);
+    }
+
+    if (hmod)
+    {
+      using ADDON_GetRecoveryParams_t = void (*)(int*, int*);
+      auto getParams = reinterpret_cast<ADDON_GetRecoveryParams_t>(
+          GetProcAddress(hmod, "ADDON_GetRecoveryParams"));
+      if (getParams)
       {
-        using ADDON_GetRecoveryParams_t = void (*)(int*, int*);
-        auto getParams = reinterpret_cast<ADDON_GetRecoveryParams_t>(
-            GetProcAddress(hmod, "ADDON_GetRecoveryParams"));
-        if (getParams)
-        {
-          getParams(&m_recoveryDelayMs, &m_maxRecoveryAttempts);
-          CLog::Log(LOGINFO,
-                    "CActiveAEDSP::Init — recovery params from chain.json: "
-                    "delay={}ms, maxAttempts={}",
-                    m_recoveryDelayMs, m_maxRecoveryAttempts);
-        }
-        else
-        {
-          CLog::Log(LOGINFO,
-                    "CActiveAEDSP::Init — ADDON_GetRecoveryParams not found; "
-                    "using defaults: delay={}ms, maxAttempts={}",
-                    m_recoveryDelayMs, m_maxRecoveryAttempts);
-        }
+        getParams(&m_recoveryDelayMs, &m_maxRecoveryAttempts);
+        CLog::Log(LOGINFO,
+                  "CActiveAEDSP::Init — recovery params from chain.json: "
+                  "delay={}ms, maxAttempts={}",
+                  m_recoveryDelayMs, m_maxRecoveryAttempts);
       }
       else
       {
-        CLog::Log(LOGWARNING,
-                  "CActiveAEDSP::Init — GetModuleHandleW failed for '{}' (error {}); "
-                  "cannot retrieve recovery params, using defaults: delay={}ms, maxAttempts={}",
-                  libPath, GetLastError(), m_recoveryDelayMs, m_maxRecoveryAttempts);
+        CLog::Log(LOGINFO,
+                  "CActiveAEDSP::Init — ADDON_GetRecoveryParams not found; "
+                  "using defaults: delay={}ms, maxAttempts={}",
+                  m_recoveryDelayMs, m_maxRecoveryAttempts);
       }
     }
     else
     {
       CLog::Log(LOGWARNING,
-                "CActiveAEDSP::Init — MultiByteToWideChar failed for '{}' (error {}); "
+                "CActiveAEDSP::Init — GetModuleHandleExW failed (error {}); "
                 "cannot retrieve recovery params, using defaults: delay={}ms, maxAttempts={}",
-                libPath, GetLastError(), m_recoveryDelayMs, m_maxRecoveryAttempts);
+                GetLastError(), m_recoveryDelayMs, m_maxRecoveryAttempts);
     }
   }
 

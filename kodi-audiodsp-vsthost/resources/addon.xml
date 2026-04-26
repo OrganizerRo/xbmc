@@ -10,21 +10,6 @@
 
   <extension point="xbmc.audiodsp"
              library_win="audiodsp.vsthost.dll">
-    <support>
-      <modes>
-        <mode id="1"
-              type="masterprocess"
-              label="VST Chain"
-              help="Process audio through a chain of VST/VST2 plugins">
-          <settings>
-            <setting id="scan_paths"
-                     label="VST Plugin Folders"
-                     type="string"
-                     default=""/>
-          </settings>
-        </mode>
-      </modes>
-    </support>
   </extension>
 
   <extension point="xbmc.addon.metadata">
