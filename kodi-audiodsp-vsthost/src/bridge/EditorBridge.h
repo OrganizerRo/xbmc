@@ -94,11 +94,13 @@ private:
     // -------------------------------------------------------------------------
 
     static constexpr const wchar_t* PIPE_NAME = L"\\\\.\\pipe\\kodi_vsthost_editor";
-    static constexpr UINT WM_VSTBRIDGE_OPEN   = WM_USER + 100;
-    static constexpr UINT WM_VSTBRIDGE_CLOSE  = WM_USER + 101;
-    static constexpr UINT WM_VSTBRIDGE_QUIT   = WM_USER + 102;
-    static constexpr UINT EDITOR_IDLE_TIMER   = 1;
-    static constexpr UINT EDITOR_IDLE_MS      = 30;
+    static constexpr UINT  WM_VSTBRIDGE_OPEN   = WM_USER + 100;
+    static constexpr UINT  WM_VSTBRIDGE_CLOSE  = WM_USER + 101;
+    static constexpr UINT  WM_VSTBRIDGE_QUIT   = WM_USER + 102;
+    static constexpr UINT  EDITOR_IDLE_TIMER   = 1;
+    static constexpr UINT  EDITOR_IDLE_MS      = 30;
+    /// Maximum milliseconds to wait for the UI thread or pipe thread to start.
+    static constexpr DWORD STARTUP_TIMEOUT_MS  = 5000;
 
     DSPChain*           m_chain = nullptr;
     std::atomic<bool>   m_running{false};
@@ -116,8 +118,14 @@ private:
     /// Pipe server handle — stored so stop() can cancel blocking ConnectNamedPipe.
     HANDLE m_pipeHandle = INVALID_HANDLE_VALUE;
 
-    /// Event signaled when the UI thread is ready (m_uiThreadID is set).
+    /// Event signaled when the UI thread is ready (m_uiThreadID is set and
+    /// the Win32 message queue has been created).
     HANDLE m_uiReadyEvent = nullptr;
+
+    /// Event signaled by pipeServerLoop() once CreateNamedPipe succeeds (or
+    /// fails), so start() can return an accurate success/failure result without
+    /// using an arbitrary Sleep().
+    HANDLE m_pipeReadyEvent = nullptr;
 
     ATOM m_windowClass = 0;
 };
