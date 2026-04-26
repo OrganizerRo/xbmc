@@ -32,4 +32,13 @@ bool extractBool(const std::string& json, const std::string& key,
 /// Returns false (default) if the field is not found.
 bool extractBool(const std::string& json, const std::string& key);
 
+/// Extract the value of an integer field: "key": 123
+/// Supports optional leading minus sign.  Returns false if not found or unparseable.
+bool extractInt(const std::string& json, const std::string& key,
+                size_t searchFrom, int& outValue, size_t& outEnd);
+
+/// Convenience overload — always searches from the beginning.
+/// Leaves outValue unchanged if the field is not found.
+bool extractInt(const std::string& json, const std::string& key, int& outValue);
+
 } // namespace JsonUtil

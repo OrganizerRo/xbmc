@@ -19,3 +19,8 @@
 // Called by CActiveAEDSP::Init() (via GetProcAddress) to route all addon log
 // messages into kodi.log.  Must be exported from the DLL as a plain C symbol.
 extern "C" void ADDON_SetLogCallback(VSTLogCallback_t cb);
+
+// Called by CActiveAEDSP::Init() (via GetProcAddress) after ADDON_Create to
+// retrieve the recovery-timer settings that were read from chain.json.
+// delayMs and maxAttempts are set to the current globals; null pointers are ignored.
+extern "C" void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts);

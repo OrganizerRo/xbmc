@@ -159,4 +159,50 @@ bool extractBool(const std::string& json, const std::string& key)
     return value;
 }
 
+bool extractInt(const std::string& json, const std::string& key,
+                size_t searchFrom, int& outValue, size_t& outEnd)
+{
+    const std::string needle = "\"" + key + "\"";
+    size_t pos = json.find(needle, searchFrom);
+    if (pos == std::string::npos)
+        return false;
+
+    pos += needle.size();
+    pos = json.find(':', pos);
+    if (pos == std::string::npos)
+        return false;
+    ++pos;
+
+    // Skip whitespace
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'
+                                 || json[pos] == '\n' || json[pos] == '\r'))
+        ++pos;
+
+    if (pos >= json.size())
+        return false;
+
+    int sign = 1;
+    if (json[pos] == '-') { sign = -1; ++pos; }
+
+    if (pos >= json.size() || json[pos] < '0' || json[pos] > '9')
+        return false;
+
+    int value = 0;
+    while (pos < json.size() && json[pos] >= '0' && json[pos] <= '9')
+    {
+        value = value * 10 + (json[pos] - '0');
+        ++pos;
+    }
+
+    outValue = sign * value;
+    outEnd   = pos;
+    return true;
+}
+
+bool extractInt(const std::string& json, const std::string& key, int& outValue)
+{
+    size_t end = 0;
+    return extractInt(json, key, 0, outValue, end);
+}
+
 } // namespace JsonUtil

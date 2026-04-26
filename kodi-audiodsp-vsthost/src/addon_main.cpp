@@ -11,6 +11,9 @@
 #include "addon_main.h"
 #include "dsp/DSPProcessor.h"
 #include "bridge/EditorBridge.h"
+#include "util/JsonUtil.h"
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <cstring>
 
@@ -33,6 +36,27 @@ static std::string g_addonDataPath;   // set in ADDON_Create, used for chain.jso
 static EditorBridge g_editorBridge;   // manages named pipe server + VST editor windows
 static DSPProcessor* g_lastProcessor = nullptr;  // most recent processor for editor bridge
 
+// Recovery params — pre-loaded from chain.json "settings" block in ADDON_Create
+// so that CActiveAEDSP::Init() can retrieve them via ADDON_GetRecoveryParams
+// before any stream (and therefore before loadConfig()) has been called.
+static int g_recoveryDelayMs     = 30000;  ///< ms to wait before auto-reload after a crash
+static int g_maxRecoveryAttempts = 3;      ///< max reload attempts per plugin load
+
+// ---------------------------------------------------------------------------
+// Recovery params export — queried by CActiveAEDSP::Init() after ADDON_Create.
+// Returns the recovery timer settings that were read from chain.json so that
+// the Kodi-side auto-recovery logic honours per-chain configuration.
+// ---------------------------------------------------------------------------
+
+extern "C" void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts)
+{
+    if (delayMs)     *delayMs     = g_recoveryDelayMs;
+    if (maxAttempts) *maxAttempts = g_maxRecoveryAttempts;
+    VSTLOG(VSTLOG_DEBUG,
+           "ADDON_GetRecoveryParams: delay=%d ms, maxAttempts=%d",
+           g_recoveryDelayMs, g_maxRecoveryAttempts);
+}
+
 // ---------------------------------------------------------------------------
 // Helper — retrieve the per-stream processor from the opaque handle.
 // handle->dataAddress is void*; we store DSPProcessor* there.
@@ -47,27 +71,50 @@ static DSPProcessor* GetProc(const ADDON_HANDLE handle)
 // ADDON lifecycle
 // ---------------------------------------------------------------------------
 
-/**ADDON_STATUS ADDON_Create(void* hdl, void* props)
-{
-    // props is AE_DSP_PROPERTIES (defined in kodi_adsp_types.h as AE_DSP_PROPERTIES)
-    const AE_DSP_PROPERTIES* dspProps = static_cast<const AE_DSP_PROPERTIES*>(props);
-    if (dspProps && dspProps->strUserPath)
-        g_addonDataPath = dspProps->strUserPath;
-
-    // Start the editor bridge immediately so the named pipe is ready for
-    // the Python VST Manager addon regardless of stream state.
-    // setChain() will be called in StreamCreate when a chain is available.
-    if (!g_editorBridge.isRunning())
-        g_editorBridge.start(nullptr);
-
-    return ADDON_STATUS_OK;
-}**/
-
 ADDON_STATUS ADDON_Create(void* hdl, void* props)
 {
     const AE_DSP_PROPERTIES* dspProps = static_cast<const AE_DSP_PROPERTIES*>(props);
     if (dspProps && dspProps->strUserPath)
         g_addonDataPath = dspProps->strUserPath;
+
+    // Pre-load recovery settings from chain.json "settings" block (best-effort).
+    // This runs before any StreamCreate, so CActiveAEDSP::Init() can retrieve
+    // the values immediately via ADDON_GetRecoveryParams without needing a stream.
+    if (!g_addonDataPath.empty())
+    {
+        const std::string filePath = g_addonDataPath + "/chain.json";
+        std::ifstream f(filePath);
+        if (f.is_open())
+        {
+            std::ostringstream ss;
+            ss << f.rdbuf();
+            const std::string json = ss.str();
+
+            const std::string settingsKey = "\"settings\"";
+            size_t spos = json.find(settingsKey);
+            if (spos != std::string::npos)
+            {
+                spos = json.find('{', spos + settingsKey.size());
+                if (spos != std::string::npos)
+                {
+                    size_t send = json.find('}', spos);
+                    if (send != std::string::npos)
+                    {
+                        const std::string block = json.substr(spos, send - spos + 1);
+                        int val = 0;
+                        if (JsonUtil::extractInt(block, "recovery_delay_ms", val) && val > 0)
+                            g_recoveryDelayMs = val;
+                        if (JsonUtil::extractInt(block, "max_recovery_attempts", val) && val > 0)
+                            g_maxRecoveryAttempts = val;
+                    }
+                }
+            }
+        }
+    }
+
+    VSTLOG(VSTLOG_INFO,
+           "ADDON_Create: recovery params — delay=%d ms, maxAttempts=%d",
+           g_recoveryDelayMs, g_maxRecoveryAttempts);
 
     // Start editor bridge
     if (!g_editorBridge.isRunning())

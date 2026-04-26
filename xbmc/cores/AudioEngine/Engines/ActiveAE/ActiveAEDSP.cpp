@@ -168,6 +168,10 @@ bool CActiveAEDSP::Init()
                     "addon log messages will not appear in kodi.log",
                     libPath);
         }
+
+        // Query chain.json recovery settings from the addon.
+        // ADDON_Create (called below) pre-loads chain.json, so we call this
+        // after Create() returns.  We defer the actual call until after Create().
       }
       else
       {
@@ -211,6 +215,39 @@ bool CActiveAEDSP::Init()
     return false;
   }
 
+  // Now that ADDON_Create has run (and pre-loaded chain.json settings),
+  // retrieve the recovery params from the addon via ADDON_GetRecoveryParams.
+  {
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, nullptr, 0);
+    if (wlen > 0)
+    {
+      std::wstring wlibPath(static_cast<size_t>(wlen), L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, &wlibPath[0], wlen);
+      HMODULE hmod = GetModuleHandleW(wlibPath.c_str());
+      if (hmod)
+      {
+        using ADDON_GetRecoveryParams_t = void (*)(int*, int*);
+        auto getParams = reinterpret_cast<ADDON_GetRecoveryParams_t>(
+            GetProcAddress(hmod, "ADDON_GetRecoveryParams"));
+        if (getParams)
+        {
+          getParams(&m_recoveryDelayMs, &m_maxRecoveryAttempts);
+          CLog::Log(LOGINFO,
+                    "CActiveAEDSP::Init — recovery params from chain.json: "
+                    "delay={}ms, maxAttempts={}",
+                    m_recoveryDelayMs, m_maxRecoveryAttempts);
+        }
+        else
+        {
+          CLog::Log(LOGINFO,
+                    "CActiveAEDSP::Init — ADDON_GetRecoveryParams not found; "
+                    "using defaults: delay={}ms, maxAttempts={}",
+                    m_recoveryDelayMs, m_maxRecoveryAttempts);
+        }
+      }
+    }
+  }
+
   m_initialized = true;
   m_dspFailed   = false;
   CLog::Log(LOGINFO, "CActiveAEDSP::Init — loaded '{}'", addon->Name());
@@ -240,8 +277,12 @@ void CActiveAEDSP::Deinit()
 
   std::memset(m_funcs, 0, sizeof(AudioDSP));
 
-  m_initialized = false;
-  m_dspFailed   = false;
+  m_initialized  = false;
+  m_dspFailed    = false;
+  // Reset recovery counters on every clean teardown so the next plugin load
+  // starts with a fresh attempt budget.
+  m_recoveryAttempts = 0;
+  m_dspNeedsReset    = false;
   CLog::Log(LOGINFO, "CActiveAEDSP::Deinit — ADSP add-on unloaded");
 }
 
@@ -377,7 +418,9 @@ void CActiveAEDSP::MasterProcess(CSampleBuffer* buf)
     {
       CLog::Log(LOGERROR,
                 "CActiveAEDSP::MasterProcess — add-on crashed (planar path); disabling DSP");
-      m_dspFailed = true;
+      m_dspFailed     = true;
+      m_dspNeedsReset = true;
+      m_failedAt      = std::chrono::steady_clock::now();
     }
   }
   else
@@ -411,7 +454,9 @@ void CActiveAEDSP::MasterProcess(CSampleBuffer* buf)
     {
       CLog::Log(LOGERROR,
                 "CActiveAEDSP::MasterProcess — add-on crashed (interleaved path); disabling DSP");
-      m_dspFailed = true;
+      m_dspFailed     = true;
+      m_dspNeedsReset = true;
+      m_failedAt      = std::chrono::steady_clock::now();
       return;
     }
 
@@ -432,6 +477,99 @@ bool CActiveAEDSP::IsActive() const
   return m_initialized && !m_dspFailed.load();
 }
 
+// ---------------------------------------------------------------------------
+// NeedsReset — cheap check callable from any thread
+// ---------------------------------------------------------------------------
+
+bool CActiveAEDSP::NeedsReset() const
+{
+  if (!m_dspNeedsReset.load())
+    return false;
+  // Gate behind the configured recovery delay so we don't hammer LoadLibraryW.
+  const auto elapsed = std::chrono::steady_clock::now() - m_failedAt;
+  return elapsed >= std::chrono::milliseconds(m_recoveryDelayMs);
+}
+
+// ---------------------------------------------------------------------------
+// TryReset — called from the AE worker thread only
+// ---------------------------------------------------------------------------
+
+bool CActiveAEDSP::TryReset(const AEAudioFormat& fmt)
+{
+  if (!m_dspFailed.load())
+    return true;  // nothing to do
+
+  // Increment crash counter; if we have already exhausted the budget, give up.
+  const int attempt = m_recoveryAttempts.fetch_add(1) + 1;
+  if (attempt > m_maxRecoveryAttempts)
+  {
+    CLog::Log(LOGWARNING,
+              "CActiveAEDSP::TryReset — max recovery attempts ({}) exhausted; "
+              "DSP remains disabled for this session",
+              m_maxRecoveryAttempts);
+    m_dspNeedsReset = false;
+    return false;
+  }
+
+  CLog::Log(LOGINFO,
+            "CActiveAEDSP::TryReset — attempt {}/{}: tearing down crashed add-on",
+            attempt, m_maxRecoveryAttempts);
+
+  // Deinit() calls FreeLibrary on the crashed DLL which may itself fault.
+  // Use SEH to survive a corrupt unload and force-zero state if needed.
+  __try
+  {
+    Deinit();
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER)
+  {
+    CLog::Log(LOGERROR,
+              "CActiveAEDSP::TryReset — Deinit() faulted on attempt {}; "
+              "force-clearing add-on state",
+              attempt);
+    // Manually null out all state without invoking DLL functions.
+    m_dll          = nullptr;
+    m_streamActive = false;
+    m_initialized  = false;
+    std::memset(m_funcs, 0, sizeof(AudioDSP));
+    m_scratch.clear();
+    m_scratchPtrs.clear();
+    // Reset atomics that Deinit() would normally clear.
+    m_recoveryAttempts = 0;
+    m_dspNeedsReset    = false;
+  }
+
+  // Deinit() resets m_recoveryAttempts to 0 — restore the count so the cap
+  // accumulates across crashes within the same session.
+  m_recoveryAttempts = attempt;
+
+  // Clear failure flags so Init() and OnConfigure() are no longer gated.
+  m_dspFailed     = false;
+  m_dspNeedsReset = false;
+
+  CLog::Log(LOGINFO,
+            "CActiveAEDSP::TryReset — attempt {}: reloading add-on DLL",
+            attempt);
+
+  if (!Init())
+  {
+    CLog::Log(LOGERROR,
+              "CActiveAEDSP::TryReset — attempt {}: Init() failed; "
+              "re-arming recovery timer (next attempt in {}ms)",
+              attempt, m_recoveryDelayMs);
+    m_dspFailed     = true;
+    m_dspNeedsReset = true;
+    m_failedAt      = std::chrono::steady_clock::now();
+    return false;
+  }
+
+  OnConfigure(fmt);
+  CLog::Log(LOGINFO,
+            "CActiveAEDSP::TryReset — DSP recovered successfully on attempt {}/{}",
+            attempt, m_maxRecoveryAttempts);
+  return true;
+}
+
 } // namespace ActiveAE
 
 #else // !TARGET_WINDOWS — stub implementations (no-ops)
@@ -447,6 +585,8 @@ void CActiveAEDSP::Deinit()                        {}
 void CActiveAEDSP::OnConfigure(const AEAudioFormat&) {}
 void CActiveAEDSP::MasterProcess(CSampleBuffer*)   {}
 bool CActiveAEDSP::IsActive() const                { return false; }
+bool CActiveAEDSP::NeedsReset() const              { return false; }
+bool CActiveAEDSP::TryReset(const AEAudioFormat&)  { return false; }
 
 } // namespace ActiveAE
 
