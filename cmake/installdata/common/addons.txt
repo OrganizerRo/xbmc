@@ -10,6 +10,7 @@ addons/kodi.peripheral/*
 addons/kodi.resource/*
 addons/xbmc.addon/metadata.xsd
 addons/xbmc.addon/repository.xsd
+addons/xbmc.audiodsp/*
 addons/xbmc.audioencoder/*
 addons/xbmc.codec/*
 addons/xbmc.core/*
