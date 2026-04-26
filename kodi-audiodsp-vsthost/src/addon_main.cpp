@@ -15,6 +15,17 @@
 #include <cstring>
 
 // ---------------------------------------------------------------------------
+// Log callback — set by CActiveAEDSP::Init() via ADDON_SetLogCallback so that
+// all VSTLOG() calls in this DLL are forwarded to kodi.log.
+// ---------------------------------------------------------------------------
+
+extern "C" void ADDON_SetLogCallback(VSTLogCallback_t cb)
+{
+    VSTLog::g_callback.store(cb, std::memory_order_relaxed);
+    VSTLOG(VSTLOG_INFO, "ADDON_SetLogCallback: log bridge registered — addon messages will appear in kodi.log");
+}
+
+// ---------------------------------------------------------------------------
 // Global state — set once in ADDON_Create, read by every StreamCreate.
 // ---------------------------------------------------------------------------
 
@@ -63,17 +74,18 @@ ADDON_STATUS ADDON_Create(void* hdl, void* props)
     {
         if (!g_editorBridge.start(nullptr))
         {
-            std::fprintf(stderr,
-                "[VSTHost] ERROR: Failed to start named pipe server\n");
+        VSTLOG(VSTLOG_ERROR, "ADDON_Create: FATAL — failed to start named pipe server");
             return ADDON_STATUS_PERMANENT_FAILURE;
         }
     }
-    
+
+    VSTLOG(VSTLOG_INFO, "ADDON_Create: addon ready, named pipe server is live");
     return ADDON_STATUS_OK;
 }
 
 void ADDON_Destroy()
 {
+    VSTLOG(VSTLOG_INFO, "ADDON_Destroy: stopping named pipe server and unloading addon");
     // Stop the editor bridge — no more streams will come.
     g_editorBridge.stop();
     g_lastProcessor = nullptr;

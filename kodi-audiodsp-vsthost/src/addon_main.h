@@ -14,3 +14,8 @@
  */
 
 #include "kodi_adsp_dll.h"   // Kodi will find this via include path
+#include "util/VSTLog.h"
+
+// Called by CActiveAEDSP::Init() (via GetProcAddress) to route all addon log
+// messages into kodi.log.  Must be exported from the DLL as a plain C symbol.
+extern "C" void ADDON_SetLogCallback(VSTLogCallback_t cb);

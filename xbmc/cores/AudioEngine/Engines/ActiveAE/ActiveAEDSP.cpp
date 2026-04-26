@@ -197,6 +197,10 @@ bool CActiveAEDSP::Init()
 
   // ADDON_Create(hdl, props) — hdl is the host-callback pointer (nullptr is
   // safe here because the add-on makes no callbacks into Kodi).
+  CLog::Log(LOGINFO,
+            "CActiveAEDSP::Init — calling ADDON_Create for '{}'; "
+            "named pipe \\\\.\\pipe\\kodi_vsthost_editor will start",
+            addon->Name());
   const ADDON_STATUS status = m_dll->Create(nullptr, &props);
   if (status != ADDON_STATUS_OK && status != ADDON_STATUS_NEED_SETTINGS)
   {
@@ -226,6 +230,9 @@ void CActiveAEDSP::Deinit()
 
   if (m_dll)
   {
+    CLog::Log(LOGINFO,
+              "CActiveAEDSP::Deinit — calling ADDON_Destroy; "
+              "named pipe \\\\.\\pipe\\kodi_vsthost_editor will stop");
     m_dll->Destroy();
     delete m_dll;
     m_dll = nullptr;
