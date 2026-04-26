@@ -170,8 +170,8 @@ bool CActiveAEDSP::Init()
         }
 
         // Query chain.json recovery settings from the addon.
-        // ADDON_Create (called below) pre-loads chain.json, so we call this
-        // after Create() returns.  We defer the actual call until after Create().
+        // ADDON_Create (called below) pre-loads chain.json, so the actual
+        // GetRecoveryParams call is deferred to after Create() returns.
       }
       else
       {
@@ -245,6 +245,20 @@ bool CActiveAEDSP::Init()
                     m_recoveryDelayMs, m_maxRecoveryAttempts);
         }
       }
+      else
+      {
+        CLog::Log(LOGWARNING,
+                  "CActiveAEDSP::Init — GetModuleHandleW failed for '{}' (error {}); "
+                  "cannot retrieve recovery params, using defaults: delay={}ms, maxAttempts={}",
+                  libPath, GetLastError(), m_recoveryDelayMs, m_maxRecoveryAttempts);
+      }
+    }
+    else
+    {
+      CLog::Log(LOGWARNING,
+                "CActiveAEDSP::Init — MultiByteToWideChar failed for '{}' (error {}); "
+                "cannot retrieve recovery params, using defaults: delay={}ms, maxAttempts={}",
+                libPath, GetLastError(), m_recoveryDelayMs, m_maxRecoveryAttempts);
     }
   }
 
@@ -534,9 +548,7 @@ bool CActiveAEDSP::TryReset(const AEAudioFormat& fmt)
     std::memset(m_funcs, 0, sizeof(AudioDSP));
     m_scratch.clear();
     m_scratchPtrs.clear();
-    // Reset atomics that Deinit() would normally clear.
-    m_recoveryAttempts = 0;
-    m_dspNeedsReset    = false;
+    // m_recoveryAttempts and m_dspNeedsReset will be corrected below.
   }
 
   // Deinit() resets m_recoveryAttempts to 0 — restore the count so the cap

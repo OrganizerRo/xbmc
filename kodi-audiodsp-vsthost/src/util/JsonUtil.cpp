@@ -5,6 +5,7 @@
  */
 #include "JsonUtil.h"
 
+#include <climits>
 #include <cstdio>
 
 namespace JsonUtil {
@@ -190,6 +191,9 @@ bool extractInt(const std::string& json, const std::string& key,
     int value = 0;
     while (pos < json.size() && json[pos] >= '0' && json[pos] <= '9')
     {
+        // Guard against integer overflow; cap at a large but safe limit.
+        if (value > (INT_MAX - 9) / 10)
+            return false;
         value = value * 10 + (json[pos] - '0');
         ++pos;
     }
