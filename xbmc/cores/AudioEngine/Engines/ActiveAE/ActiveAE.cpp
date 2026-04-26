@@ -965,6 +965,19 @@ void CActiveAE::StateMachine(int signal, Protocol *port, Message *msg)
             m_extTimeout = 100;
             return;
           }
+#ifdef TARGET_WINDOWS
+          // §8 Layer 3 — auto-recovery: reload a crashed DSP add-on from the
+          // idle branch of the worker thread (never from the render thread).
+          // NeedsReset() is cheap (two atomic loads + steady_clock read) and
+          // returns false on the hot path, so this check is zero-overhead when
+          // the add-on is healthy.
+          if (m_dsp.NeedsReset())
+          {
+            CLog::Log(LOGINFO,
+                      "CActiveAE — DSP crash detected; attempting auto-recovery");
+            m_dsp.TryReset(m_internalFormat);
+          }
+#endif
           if (RunStages())
           {
             m_extTimeout = 0;

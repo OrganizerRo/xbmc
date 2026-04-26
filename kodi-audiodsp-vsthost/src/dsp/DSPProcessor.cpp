@@ -5,7 +5,6 @@
  */
 #include "DSPProcessor.h"
 #include "kodi_adsp_types.h"
-#include "../util/VSTLog.h"
 
 #include <algorithm>
 #include <cstring>
@@ -45,10 +44,10 @@ bool DSPProcessor::streamCreate(const AE_DSP_SETTINGS* settings)
 
     if (!m_chain.initialize(static_cast<double>(m_sampleRate), blockSize, m_numChannels))
     {
-        VSTLog(VSTLOG_ERROR,
-               "[DSPProcessor] streamCreate: chain initialization failed "
-               "(streamID=%d, sampleRate=%d, channels=%d)",
-               m_streamID, m_sampleRate, m_numChannels);
+        std::fprintf(stderr,
+            "[DSPProcessor] streamCreate: chain initialization failed "
+            "(streamID=%d, sampleRate=%d, channels=%d)\n",
+            m_streamID, m_sampleRate, m_numChannels);
         return false;
     }
 
@@ -56,9 +55,6 @@ bool DSPProcessor::streamCreate(const AE_DSP_SETTINGS* settings)
     loadConfig();
 
     m_active = true;
-    VSTLog(VSTLOG_INFO,
-           "[DSPProcessor] Stream created — id=%d, %d Hz, %d ch, %d frames/block",
-           m_streamID, m_sampleRate, m_numChannels, blockSize);
     return true;
 }
 
@@ -196,12 +192,7 @@ bool DSPProcessor::loadConfig()
 
     std::ifstream file(filePath);
     if (!file.is_open())
-    {
-        VSTLog(VSTLOG_DEBUG,
-               "[DSPProcessor] loadConfig: no config at '%s' — starting with empty chain",
-               filePath.c_str());
         return false;
-    }
 
     std::ostringstream ss;
     ss << file.rdbuf();
@@ -210,14 +201,7 @@ bool DSPProcessor::loadConfig()
     if (json.empty())
         return false;
 
-    const bool ok = m_chain.deserializeFromJson(json);
-    if (ok)
-        VSTLog(VSTLOG_INFO, "[DSPProcessor] Loaded chain config from '%s'",
-               filePath.c_str());
-    else
-        VSTLog(VSTLOG_WARNING,
-               "[DSPProcessor] loadConfig: failed to parse '%s'", filePath.c_str());
-    return ok;
+    return m_chain.deserializeFromJson(json);
 }
 
 // =============================================================================
@@ -235,9 +219,9 @@ bool DSPProcessor::saveConfig()
     std::ofstream file(filePath, std::ios::out | std::ios::trunc);
     if (!file.is_open())
     {
-        VSTLog(VSTLOG_ERROR,
-               "[DSPProcessor] saveConfig: cannot open '%s' for writing",
-               filePath.c_str());
+        std::fprintf(stderr,
+            "[DSPProcessor] saveConfig: cannot open '%s' for writing\n",
+            filePath.c_str());
         return false;
     }
 

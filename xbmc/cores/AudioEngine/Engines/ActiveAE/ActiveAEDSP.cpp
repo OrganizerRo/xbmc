@@ -136,39 +136,55 @@ bool CActiveAEDSP::Init()
   // adding it to the DllAddon wrapper, so that non-VST addons are unaffected.
   {
     int wlen = MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, nullptr, 0);
-    std::wstring wlibPath(wlen, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, wlibPath.data(), wlen);
-
-    HMODULE hmod = GetModuleHandleW(wlibPath.c_str());
-    if (hmod)
+    if (wlen > 0)
     {
-      // VSTLog.h is an addon-internal header and is not on Kodi's include path,
-      // so we declare the callback signature locally rather than including it.
-      // The signature must stay in sync with VSTLogCallback in VSTLog.h:
-      //   void (*)(int level, const char* msg)
-      typedef void (*VSTLogCallback_t)(int level, const char* msg);
-      auto* setLog = reinterpret_cast<VSTLogCallback_t>(
-          GetProcAddress(hmod, "ADDON_SetLogCallback"));
+      std::wstring wlibPath(static_cast<size_t>(wlen), L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, &wlibPath[0], wlen);
 
-      if (setLog)
+      HMODULE hmod = GetModuleHandleW(wlibPath.c_str());
+      if (hmod)
       {
-        setLog(vstLogBridge);
-        CLog::Log(LOGDEBUG,
-                  "CActiveAEDSP::Init — log callback registered; addon messages will appear in kodi.log");
+        // VSTLog.h is an addon-internal header and is not on Kodi's include path,
+        // so we declare the callback signature locally rather than including it.
+        // The signature must stay in sync with VSTLogCallback in VSTLog.h:
+        //   void (*)(int level, const char* msg)
+        // ADDON_SetLogCallback is a setter that *accepts* a callback pointer,
+        // so its signature is: void ADDON_SetLogCallback(VSTLogCallback_t cb)
+        using VSTLogCallback_t = void (*)(int level, const char* msg);
+        using ADDON_SetLogCallback_t = void (*)(VSTLogCallback_t cb);
+        auto setLog = reinterpret_cast<ADDON_SetLogCallback_t>(
+            GetProcAddress(hmod, "ADDON_SetLogCallback"));
+
+        if (setLog)
+        {
+          setLog(vstLogBridge);
+          CLog::Log(LOGDEBUG,
+                    "CActiveAEDSP::Init — log callback registered; addon messages will appear in kodi.log");
+        }
+        else
+        {
+          CLog::Log(LOGWARNING,
+                    "CActiveAEDSP::Init — ADDON_SetLogCallback not found in '{}'; "
+                    "addon log messages will not appear in kodi.log",
+                    libPath);
+        }
+
+        // Query chain.json recovery settings from the addon.
+        // ADDON_Create (called below) pre-loads chain.json, so the actual
+        // GetRecoveryParams call is deferred to after Create() returns.
       }
       else
       {
         CLog::Log(LOGWARNING,
-                  "CActiveAEDSP::Init — ADDON_SetLogCallback not found in '{}'; "
-                  "addon log messages will not appear in kodi.log",
-                  libPath);
+                  "CActiveAEDSP::Init — GetModuleHandleW failed for '{}' (error {}); "
+                  "cannot register log callback",
+                  libPath, GetLastError());
       }
     }
     else
     {
       CLog::Log(LOGWARNING,
-                "CActiveAEDSP::Init — GetModuleHandleW failed for '{}' (error {}); "
-                "cannot register log callback",
+                "CActiveAEDSP::Init — MultiByteToWideChar failed for '{}' (error {})",
                 libPath, GetLastError());
     }
   }
@@ -185,6 +201,10 @@ bool CActiveAEDSP::Init()
 
   // ADDON_Create(hdl, props) — hdl is the host-callback pointer (nullptr is
   // safe here because the add-on makes no callbacks into Kodi).
+  CLog::Log(LOGINFO,
+            "CActiveAEDSP::Init — calling ADDON_Create for '{}'; "
+            "named pipe \\\\.\\pipe\\kodi_vsthost_editor will start",
+            addon->Name());
   const ADDON_STATUS status = m_dll->Create(nullptr, &props);
   if (status != ADDON_STATUS_OK && status != ADDON_STATUS_NEED_SETTINGS)
   {
@@ -193,6 +213,53 @@ bool CActiveAEDSP::Init()
     delete m_dll;
     m_dll = nullptr;
     return false;
+  }
+
+  // Now that ADDON_Create has run (and pre-loaded chain.json settings),
+  // retrieve the recovery params from the addon via ADDON_GetRecoveryParams.
+  {
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, nullptr, 0);
+    if (wlen > 0)
+    {
+      std::wstring wlibPath(static_cast<size_t>(wlen), L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, &wlibPath[0], wlen);
+      HMODULE hmod = GetModuleHandleW(wlibPath.c_str());
+      if (hmod)
+      {
+        using ADDON_GetRecoveryParams_t = void (*)(int*, int*);
+        auto getParams = reinterpret_cast<ADDON_GetRecoveryParams_t>(
+            GetProcAddress(hmod, "ADDON_GetRecoveryParams"));
+        if (getParams)
+        {
+          getParams(&m_recoveryDelayMs, &m_maxRecoveryAttempts);
+          CLog::Log(LOGINFO,
+                    "CActiveAEDSP::Init — recovery params from chain.json: "
+                    "delay={}ms, maxAttempts={}",
+                    m_recoveryDelayMs, m_maxRecoveryAttempts);
+        }
+        else
+        {
+          CLog::Log(LOGINFO,
+                    "CActiveAEDSP::Init — ADDON_GetRecoveryParams not found; "
+                    "using defaults: delay={}ms, maxAttempts={}",
+                    m_recoveryDelayMs, m_maxRecoveryAttempts);
+        }
+      }
+      else
+      {
+        CLog::Log(LOGWARNING,
+                  "CActiveAEDSP::Init — GetModuleHandleW failed for '{}' (error {}); "
+                  "cannot retrieve recovery params, using defaults: delay={}ms, maxAttempts={}",
+                  libPath, GetLastError(), m_recoveryDelayMs, m_maxRecoveryAttempts);
+      }
+    }
+    else
+    {
+      CLog::Log(LOGWARNING,
+                "CActiveAEDSP::Init — MultiByteToWideChar failed for '{}' (error {}); "
+                "cannot retrieve recovery params, using defaults: delay={}ms, maxAttempts={}",
+                libPath, GetLastError(), m_recoveryDelayMs, m_maxRecoveryAttempts);
+    }
   }
 
   m_initialized = true;
@@ -214,6 +281,9 @@ void CActiveAEDSP::Deinit()
 
   if (m_dll)
   {
+    CLog::Log(LOGINFO,
+              "CActiveAEDSP::Deinit — calling ADDON_Destroy; "
+              "named pipe \\\\.\\pipe\\kodi_vsthost_editor will stop");
     m_dll->Destroy();
     delete m_dll;
     m_dll = nullptr;
@@ -221,8 +291,12 @@ void CActiveAEDSP::Deinit()
 
   std::memset(m_funcs, 0, sizeof(AudioDSP));
 
-  m_initialized = false;
-  m_dspFailed   = false;
+  m_initialized  = false;
+  m_dspFailed    = false;
+  // Reset recovery counters on every clean teardown so the next plugin load
+  // starts with a fresh attempt budget.
+  m_recoveryAttempts = 0;
+  m_dspNeedsReset    = false;
   CLog::Log(LOGINFO, "CActiveAEDSP::Deinit — ADSP add-on unloaded");
 }
 
@@ -358,7 +432,9 @@ void CActiveAEDSP::MasterProcess(CSampleBuffer* buf)
     {
       CLog::Log(LOGERROR,
                 "CActiveAEDSP::MasterProcess — add-on crashed (planar path); disabling DSP");
-      m_dspFailed = true;
+      m_dspFailed     = true;
+      m_dspNeedsReset = true;
+      m_failedAt      = std::chrono::steady_clock::now();
     }
   }
   else
@@ -392,7 +468,9 @@ void CActiveAEDSP::MasterProcess(CSampleBuffer* buf)
     {
       CLog::Log(LOGERROR,
                 "CActiveAEDSP::MasterProcess — add-on crashed (interleaved path); disabling DSP");
-      m_dspFailed = true;
+      m_dspFailed     = true;
+      m_dspNeedsReset = true;
+      m_failedAt      = std::chrono::steady_clock::now();
       return;
     }
 
@@ -413,6 +491,97 @@ bool CActiveAEDSP::IsActive() const
   return m_initialized && !m_dspFailed.load();
 }
 
+// ---------------------------------------------------------------------------
+// NeedsReset — cheap check callable from any thread
+// ---------------------------------------------------------------------------
+
+bool CActiveAEDSP::NeedsReset() const
+{
+  if (!m_dspNeedsReset.load())
+    return false;
+  // Gate behind the configured recovery delay so we don't hammer LoadLibraryW.
+  const auto elapsed = std::chrono::steady_clock::now() - m_failedAt;
+  return elapsed >= std::chrono::milliseconds(m_recoveryDelayMs);
+}
+
+// ---------------------------------------------------------------------------
+// TryReset — called from the AE worker thread only
+// ---------------------------------------------------------------------------
+
+bool CActiveAEDSP::TryReset(const AEAudioFormat& fmt)
+{
+  if (!m_dspFailed.load())
+    return true;  // nothing to do
+
+  // Increment crash counter; if we have already exhausted the budget, give up.
+  const int attempt = m_recoveryAttempts.fetch_add(1) + 1;
+  if (attempt > m_maxRecoveryAttempts)
+  {
+    CLog::Log(LOGWARNING,
+              "CActiveAEDSP::TryReset — max recovery attempts ({}) exhausted; "
+              "DSP remains disabled for this session",
+              m_maxRecoveryAttempts);
+    m_dspNeedsReset = false;
+    return false;
+  }
+
+  CLog::Log(LOGINFO,
+            "CActiveAEDSP::TryReset — attempt {}/{}: tearing down crashed add-on",
+            attempt, m_maxRecoveryAttempts);
+
+  // Deinit() calls FreeLibrary on the crashed DLL which may itself fault.
+  // Use SEH to survive a corrupt unload and force-zero state if needed.
+  __try
+  {
+    Deinit();
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER)
+  {
+    CLog::Log(LOGERROR,
+              "CActiveAEDSP::TryReset — Deinit() faulted on attempt {}; "
+              "force-clearing add-on state",
+              attempt);
+    // Manually null out all state without invoking DLL functions.
+    m_dll          = nullptr;
+    m_streamActive = false;
+    m_initialized  = false;
+    std::memset(m_funcs, 0, sizeof(AudioDSP));
+    m_scratch.clear();
+    m_scratchPtrs.clear();
+    // m_recoveryAttempts and m_dspNeedsReset will be corrected below.
+  }
+
+  // Deinit() resets m_recoveryAttempts to 0 — restore the count so the cap
+  // accumulates across crashes within the same session.
+  m_recoveryAttempts = attempt;
+
+  // Clear failure flags so Init() and OnConfigure() are no longer gated.
+  m_dspFailed     = false;
+  m_dspNeedsReset = false;
+
+  CLog::Log(LOGINFO,
+            "CActiveAEDSP::TryReset — attempt {}: reloading add-on DLL",
+            attempt);
+
+  if (!Init())
+  {
+    CLog::Log(LOGERROR,
+              "CActiveAEDSP::TryReset — attempt {}: Init() failed; "
+              "re-arming recovery timer (next attempt in {}ms)",
+              attempt, m_recoveryDelayMs);
+    m_dspFailed     = true;
+    m_dspNeedsReset = true;
+    m_failedAt      = std::chrono::steady_clock::now();
+    return false;
+  }
+
+  OnConfigure(fmt);
+  CLog::Log(LOGINFO,
+            "CActiveAEDSP::TryReset — DSP recovered successfully on attempt {}/{}",
+            attempt, m_maxRecoveryAttempts);
+  return true;
+}
+
 } // namespace ActiveAE
 
 #else // !TARGET_WINDOWS — stub implementations (no-ops)
@@ -428,6 +597,8 @@ void CActiveAEDSP::Deinit()                        {}
 void CActiveAEDSP::OnConfigure(const AEAudioFormat&) {}
 void CActiveAEDSP::MasterProcess(CSampleBuffer*)   {}
 bool CActiveAEDSP::IsActive() const                { return false; }
+bool CActiveAEDSP::NeedsReset() const              { return false; }
+bool CActiveAEDSP::TryReset(const AEAudioFormat&)  { return false; }
 
 } // namespace ActiveAE
 
