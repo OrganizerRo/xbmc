@@ -260,6 +260,7 @@ AE_DSP_ERROR StreamCreate(const AE_DSP_SETTINGS* addonSettings,
 
     if (!proc->streamCreate(addonSettings))
     {
+        VSTLOG(VSTLOG_ERROR, "StreamCreate: DSPProcessor::streamCreate failed");
         delete proc;
         return AE_DSP_ERROR_FAILED;
     }
@@ -284,6 +285,8 @@ AE_DSP_ERROR StreamDestroy(const ADDON_HANDLE handle)
     DSPProcessor* proc = GetProc(handle);
     if (!proc)
         return AE_DSP_ERROR_INVALID_PARAMETERS;
+
+    VSTLOG(VSTLOG_INFO, "StreamDestroy: stream %d", proc->getStreamID());
 
     // Detach the chain from the editor bridge so subsequent "open" commands
     // fail gracefully until the next StreamCreate provides a new chain.

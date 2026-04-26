@@ -13,6 +13,7 @@
  */
 
 #include "VSTPlugin2.h"
+#include "../util/VSTLog.h"
 
 #include <algorithm>
 #include <cstring>
@@ -73,7 +74,11 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
 
     m_hModule = LoadLibraryW(wpath.c_str());
     if (!m_hModule)
+    {
+        VSTLOG(VSTLOG_ERROR, "[VSTPlugin2] LoadLibraryW failed for '%s': error %lu",
+               m_path.c_str(), GetLastError());
         return false;
+    }
 
     // --- 2. Locate entry point -------------------------------------------------
     VSTENTRYPROC proc = reinterpret_cast<VSTENTRYPROC>(
@@ -83,6 +88,9 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
             GetProcAddress(m_hModule, "main"));
 
     if (!proc) {
+        VSTLOG(VSTLOG_ERROR,
+               "[VSTPlugin2] No VSTPluginMain or main entry point found in '%s'",
+               m_path.c_str());
         FreeLibrary(m_hModule);
         m_hModule = nullptr;
         return false;
@@ -91,6 +99,9 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
     // --- 3. Instantiate the plugin (SEH-guarded) --------------------------------
     m_effect = callPluginMainSafe(proc);
     if (!m_effect) {
+        VSTLOG(VSTLOG_ERROR,
+               "[VSTPlugin2] Plugin entry point returned null (crash or bad plugin): '%s'",
+               m_path.c_str());
         FreeLibrary(m_hModule);
         m_hModule = nullptr;
         return false;
@@ -98,6 +109,9 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
 
     // --- 4. Validate magic number -----------------------------------------------
     if (m_effect->magic != kEffectMagic) {
+        VSTLOG(VSTLOG_ERROR,
+               "[VSTPlugin2] Invalid VST2 magic 0x%08X in '%s' (expected 0x%08X)",
+               m_effect->magic, m_path.c_str(), kEffectMagic);
         FreeLibrary(m_hModule);
         m_hModule = nullptr;
         m_effect  = nullptr;
@@ -150,6 +164,11 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
     // --- 13. Mark as loaded and active ------------------------------------------
     m_loaded = true;
     m_active = true;
+
+    VSTLOG(VSTLOG_INFO,
+           "[VSTPlugin2] Loaded '%s' — vendor: '%s', params: %d, in: %d ch, out: %d ch",
+           m_name.c_str(), m_vendor.c_str(),
+           m_effect->numParams, m_effect->numInputs, m_effect->numOutputs);
 
     return true;
 }
