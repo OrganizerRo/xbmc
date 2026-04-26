@@ -64,6 +64,9 @@ bool EditorBridge::start(DSPChain* chain)
         if (waitResult != WAIT_OBJECT_0)
         {
             // Timed out or the wait itself failed — treat as startup failure.
+            VSTLOG(VSTLOG_ERROR,
+                   "EditorBridge::start — pipe thread did not signal within %lu ms; aborting startup",
+                   static_cast<unsigned long>(STARTUP_TIMEOUT_MS));
             m_running = false;
             return false;
         }
@@ -71,7 +74,11 @@ bool EditorBridge::start(DSPChain* chain)
 
     // pipeServerLoop() sets m_running = false when CreateNamedPipe fails.
     if (!m_running.load())
+    {
+        VSTLOG(VSTLOG_ERROR,
+               "EditorBridge::start — pipe thread failed to create the named pipe");
         return false;
+    }
 
     VSTLOG(VSTLOG_INFO, "EditorBridge::start — named pipe server started: \\\\.\\pipe\\kodi_vsthost_editor");
     return true;
@@ -113,6 +120,8 @@ void EditorBridge::stop()
         m_uiThread.join();
 
     m_uiThreadID = 0;
+
+    VSTLOG(VSTLOG_INFO, "EditorBridge::stop — named pipe server shutdown complete");
 }
 
 void EditorBridge::setChain(DSPChain* chain)
@@ -160,7 +169,16 @@ void EditorBridge::pipeServerLoop()
         DWORD err = GetLastError();
 
         if (!connected && err != ERROR_PIPE_CONNECTED)
+        {
+            // Only warn on unexpected errors while still running; when
+            // stop() cancels the I/O this returns ERROR_OPERATION_ABORTED
+            // and m_running will be false, so the while condition handles it.
+            if (m_running.load())
+                VSTLOG(VSTLOG_WARN,
+                       "EditorBridge::pipeServerLoop — ConnectNamedPipe failed (err=%lu), retrying",
+                       static_cast<unsigned long>(err));
             continue;
+        }
 
         VSTLOG(VSTLOG_DEBUG, "EditorBridge::pipeServerLoop — client connected");
         handleClient(m_pipeHandle);
@@ -169,6 +187,8 @@ void EditorBridge::pipeServerLoop()
         DisconnectNamedPipe(m_pipeHandle);
         VSTLOG(VSTLOG_DEBUG, "EditorBridge::pipeServerLoop — client disconnected");
     }
+
+    VSTLOG(VSTLOG_INFO, "EditorBridge::pipeServerLoop — pipe server loop exited");
 }
 
 
