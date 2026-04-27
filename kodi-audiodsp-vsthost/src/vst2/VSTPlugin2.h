@@ -101,6 +101,11 @@ private:
     /// in the same scope — see implementation comment.
     AEffect* callPluginMainSafe(VSTENTRYPROC proc);
 
+    /// Call effEditOpen inside an SEH frame.  Returns the dispatcher result on
+    /// success, or -1 if the plugin threw a structured exception.  Must NOT
+    /// have C++ objects with destructors in the same scope (MSVC C4509).
+    static VstIntPtr callEditOpenSafe(AEffect* effect, void* parentWindow);
+
     /// Drain the parameter change ring buffer into the plugin (audio thread).
     void drainParamQueue();
 
@@ -126,6 +131,14 @@ private:
     bool m_active = false;
 
     RingBuffer<ParamChange2, 256> m_paramQueue;
+
+    // Time info — returned to plugins that call audioMasterGetTime.
+    // samplePos is incremented each process() call; other fields set in load().
+    VstTimeInfo m_timeInfo{};
+
+    // HWND of the host window that was passed to openEditor(); used to forward
+    // audioMasterSizeWindow resize requests back to EditorBridge via PostMessage.
+    HWND m_editorHwnd = nullptr;
 
     // Scratch buffers — allocated once in load(), reused every process() call
     std::vector<std::vector<float>> m_inputBufs;

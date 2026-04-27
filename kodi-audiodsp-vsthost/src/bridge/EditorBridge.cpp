@@ -261,9 +261,14 @@ std::string EditorBridge::processCommand(const std::string& json)
                    + "\",\"error\":\"Plugin not in chain\"}";
 
         if (!plugin->hasEditor())
+        {
+            VSTLOG(VSTLOG_DEBUG,
+                   "EditorBridge::processCommand — plugin '%s' has no editor (effFlagsHasEditor not set)",
+                   path.c_str());
             return "{\"status\":\"ok\",\"cmd\":\"open\",\"path\":\""
                    + JsonUtil::escape(path)
                    + "\",\"hasEditor\":false}";
+        }
 
         // Post a message to the UI thread to open the editor
         // We allocate a string on the heap and pass its pointer via LPARAM
@@ -345,6 +350,8 @@ void EditorBridge::uiThreadLoop()
     VSTLOG(VSTLOG_INFO, "EditorBridge::uiThreadLoop — UI thread ready (threadID: %lu)", m_uiThreadID);
 
     MSG msg;
+    __try
+    {
     while (GetMessageW(&msg, nullptr, 0, 0))
     {
         // Handle our custom messages
@@ -384,6 +391,15 @@ void EditorBridge::uiThreadLoop()
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    } __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        VSTLOG(VSTLOG_ERROR,
+               "EditorBridge::uiThreadLoop — unexpected structured exception 0x%08lX; UI thread exiting",
+               static_cast<unsigned long>(GetExceptionCode()));
+        m_running = false;
+    }
+
+    VSTLOG(VSTLOG_INFO, "EditorBridge::uiThreadLoop — message loop exited");
 
     // Cleanup: close all editors
     doCloseAll();
@@ -436,9 +452,13 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
     if (!plugin || !plugin->hasEditor())
         return;
 
-    // Get editor size
+    // Get editor size (pre-open query — may return 0×0 for some plugins until
+    // after effEditOpen; we use it to size the initial window and re-query after open)
     int editorW = 640, editorH = 480;
-    plugin->getEditorSize(editorW, editorH);
+    bool preOpenSizeValid = plugin->getEditorSize(editorW, editorH);
+    VSTLOG(VSTLOG_DEBUG,
+           "EditorBridge::doOpenEditor — pre-open rect for '%s': %dx%d (valid=%d)",
+           pluginPath.c_str(), editorW, editorH, preOpenSizeValid ? 1 : 0);
 
     // Compute window rect (add frame to client size)
     RECT wr = {0, 0, static_cast<LONG>(editorW), static_cast<LONG>(editorH)};
@@ -654,6 +674,25 @@ LRESULT EditorBridge::handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     }
 
     default:
+        // WM_VSTBRIDGE_RESIZE (WM_USER+103): plugin called audioMasterSizeWindow.
+        // WPARAM = new client width, LPARAM = new client height.
+        if (msg == WM_VSTBRIDGE_RESIZE)
+        {
+            int newW = static_cast<int>(wParam);
+            int newH = static_cast<int>(lParam);
+            VSTLOG(VSTLOG_DEBUG,
+                   "EditorBridge::handleMessage — WM_VSTBRIDGE_RESIZE: %dx%d for hwnd %p",
+                   newW, newH, static_cast<void*>(hwnd));
+            if (newW > 0 && newH > 0)
+            {
+                RECT r = {0, 0, static_cast<LONG>(newW), static_cast<LONG>(newH)};
+                AdjustWindowRectEx(&r, WS_OVERLAPPEDWINDOW, FALSE, 0);
+                SetWindowPos(hwnd, nullptr, 0, 0,
+                             r.right - r.left, r.bottom - r.top,
+                             SWP_NOMOVE | SWP_NOZORDER);
+            }
+            return 0;
+        }
         break;
     }
 
