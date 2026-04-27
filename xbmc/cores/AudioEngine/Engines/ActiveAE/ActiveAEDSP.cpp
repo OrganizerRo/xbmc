@@ -24,9 +24,9 @@
 #include "addons/AddonInfo.h"
 #include "addons/AddonManager.h"
 #include "addons/binary-addons/AddonDll.h"
-#include "addons/binary-addons/DllAddon.h"
 #include "filesystem/Directory.h"
 #include "filesystem/SpecialProtocol.h"
+#include "platform/win32/CharsetConverter.h"
 #include "utils/log.h"
 
 // Legacy ADSP add-on API (from kodi-audiodsp-vsthost/include/kodi-legacy-adsp/)
@@ -110,81 +110,67 @@ bool CActiveAEDSP::Init()
     return false;
   }
 
-  // Load the DLL directly, bypassing CAddonDll::Create() / CheckAPIVersion(),
-  // because legacy ADSP DLLs do not export ADDON_GetTypeVersion.
+  // Load the DLL directly with LoadLibraryW, bypassing DllAddon::Load() which
+  // mandates ADDON_GetTypeVersion as a non-optional export.  Legacy ADSP DLLs
+  // do not export ADDON_GetTypeVersion — they predate that API version check.
   // NOTE: audiodsp.vsthost makes no callbacks into Kodi (it uses no libKODI_adsp
   // host-callback stubs), so nullptr is safe as the host-callbacks argument.
   // If a future ADSP add-on needs host callbacks this approach must be revisited.
-  m_dll = new DllAddon;
-  m_dll->SetFile(libPath);
-  m_dll->EnableDelayedUnload(false);
-  if (!m_dll->Load())
   {
-    CLog::Log(LOGERROR, "CActiveAEDSP::Init — failed to load DLL '{}'", libPath);
-    delete m_dll;
-    m_dll = nullptr;
+    m_hDll = LoadLibraryW(KODI::PLATFORM::WINDOWS::ToW(libPath).c_str());
+  }
+  if (!m_hDll)
+  {
+    CLog::Log(LOGERROR, "CActiveAEDSP::Init — LoadLibraryW failed for '{}' (error {})",
+              libPath, GetLastError());
     return false;
   }
 
   // Fill the function-pointer table via get_addon().
+  using get_addon_t = void (__cdecl*)(void*);
+  auto getAddonFn = reinterpret_cast<get_addon_t>(GetProcAddress(m_hDll, "get_addon"));
+  if (!getAddonFn)
+  {
+    CLog::Log(LOGERROR, "CActiveAEDSP::Init — 'get_addon' not found in '{}'", libPath);
+    FreeLibrary(m_hDll);
+    m_hDll = nullptr;
+    return false;
+  }
   std::memset(m_funcs, 0, sizeof(AudioDSP));
-  m_dll->GetAddon(m_funcs);
+  getAddonFn(m_funcs);
 
   // Register our log bridge so the addon's internal messages (VSTLog) appear
   // in kodi.log.  The addon exports ADDON_SetLogCallback as a plain extern "C"
-  // function; we look it up via GetModuleHandleExW + GetProcAddress rather than
-  // adding it to the DllAddon wrapper, so that non-VST addons are unaffected.
-  // Use GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS with a known function pointer rather
-  // than GetModuleHandleW(path) to avoid any path-format matching issues.
+  // function; resolve it directly from m_hDll.
   {
-    HMODULE hmod = nullptr;
-    if (m_funcs->GetDSPName)
+    // VSTLog.h is an addon-internal header and is not on Kodi's include path,
+    // so we declare the callback signature locally rather than including it.
+    // The signature must stay in sync with VSTLogCallback in VSTLog.h:
+    //   void (*)(int level, const char* msg)
+    // ADDON_SetLogCallback is a setter that *accepts* a callback pointer,
+    // so its signature is: void ADDON_SetLogCallback(VSTLogCallback_t cb)
+    using VSTLogCallback_t = void (*)(int level, const char* msg);
+    using ADDON_SetLogCallback_t = void (*)(VSTLogCallback_t cb);
+    auto setLog = reinterpret_cast<ADDON_SetLogCallback_t>(
+        GetProcAddress(m_hDll, "ADDON_SetLogCallback"));
+
+    if (setLog)
     {
-      GetModuleHandleExW(
-          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-          reinterpret_cast<LPCWSTR>(m_funcs->GetDSPName),
-          &hmod);
-    }
-
-    if (hmod)
-    {
-      // VSTLog.h is an addon-internal header and is not on Kodi's include path,
-      // so we declare the callback signature locally rather than including it.
-      // The signature must stay in sync with VSTLogCallback in VSTLog.h:
-      //   void (*)(int level, const char* msg)
-      // ADDON_SetLogCallback is a setter that *accepts* a callback pointer,
-      // so its signature is: void ADDON_SetLogCallback(VSTLogCallback_t cb)
-      using VSTLogCallback_t = void (*)(int level, const char* msg);
-      using ADDON_SetLogCallback_t = void (*)(VSTLogCallback_t cb);
-      auto setLog = reinterpret_cast<ADDON_SetLogCallback_t>(
-          GetProcAddress(hmod, "ADDON_SetLogCallback"));
-
-      if (setLog)
-      {
-        setLog(vstLogBridge);
-        CLog::Log(LOGDEBUG,
-                  "CActiveAEDSP::Init — log callback registered; addon messages will appear in kodi.log");
-      }
-      else
-      {
-        CLog::Log(LOGWARNING,
-                  "CActiveAEDSP::Init — ADDON_SetLogCallback not found in '{}'; "
-                  "addon log messages will not appear in kodi.log",
-                  libPath);
-      }
-
-      // Query chain.json recovery settings from the addon.
-      // ADDON_Create (called below) pre-loads chain.json, so the actual
-      // GetRecoveryParams call is deferred to after Create() returns.
+      setLog(vstLogBridge);
+      CLog::Log(LOGDEBUG,
+                "CActiveAEDSP::Init — log callback registered; addon messages will appear in kodi.log");
     }
     else
     {
       CLog::Log(LOGWARNING,
-                "CActiveAEDSP::Init — GetModuleHandleExW failed (error {}); "
-                "cannot register log callback",
-                GetLastError());
+                "CActiveAEDSP::Init — ADDON_SetLogCallback not found in '{}'; "
+                "addon log messages will not appear in kodi.log",
+                libPath);
     }
+
+    // Query chain.json recovery settings from the addon.
+    // ADDON_Create (called below) pre-loads chain.json, so the actual
+    // GetRecoveryParams call is deferred to after Create() returns.
   }
 
   // Prepare user-data and add-on-path strings (must outlive ADDON_Create call).
@@ -203,56 +189,48 @@ bool CActiveAEDSP::Init()
             "CActiveAEDSP::Init — calling ADDON_Create for '{}'; "
             "named pipe \\\\.\\pipe\\kodi_vsthost_editor will start",
             addon->Name());
-  const ADDON_STATUS status = m_dll->Create(nullptr, &props);
+  using ADDON_Create_t = ADDON_STATUS (__cdecl*)(void*, void*);
+  auto createFn = reinterpret_cast<ADDON_Create_t>(GetProcAddress(m_hDll, "ADDON_Create"));
+  if (!createFn)
+  {
+    CLog::Log(LOGERROR, "CActiveAEDSP::Init — 'ADDON_Create' not found in '{}'", libPath);
+    FreeLibrary(m_hDll);
+    m_hDll = nullptr;
+    return false;
+  }
+  const ADDON_STATUS status = createFn(nullptr, &props);
   if (status != ADDON_STATUS_OK && status != ADDON_STATUS_NEED_SETTINGS)
   {
     CLog::Log(LOGERROR, "CActiveAEDSP::Init — ADDON_Create returned error {}", (int)status);
-    m_dll->Destroy();
-    delete m_dll;
-    m_dll = nullptr;
+    using ADDON_Destroy_t = void (__cdecl*)();
+    auto destroyFn = reinterpret_cast<ADDON_Destroy_t>(GetProcAddress(m_hDll, "ADDON_Destroy"));
+    if (destroyFn)
+      destroyFn();
+    FreeLibrary(m_hDll);
+    m_hDll = nullptr;
     return false;
   }
 
   // Now that ADDON_Create has run (and pre-loaded chain.json settings),
   // retrieve the recovery params from the addon via ADDON_GetRecoveryParams.
   {
-    HMODULE hmod = nullptr;
-    if (m_funcs->GetDSPName)
+    using ADDON_GetRecoveryParams_t = void (__cdecl*)(int*, int*);
+    auto getParams = reinterpret_cast<ADDON_GetRecoveryParams_t>(
+        GetProcAddress(m_hDll, "ADDON_GetRecoveryParams"));
+    if (getParams)
     {
-      GetModuleHandleExW(
-          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-          GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-          reinterpret_cast<LPCWSTR>(m_funcs->GetDSPName),
-          &hmod);
-    }
-
-    if (hmod)
-    {
-      using ADDON_GetRecoveryParams_t = void (*)(int*, int*);
-      auto getParams = reinterpret_cast<ADDON_GetRecoveryParams_t>(
-          GetProcAddress(hmod, "ADDON_GetRecoveryParams"));
-      if (getParams)
-      {
-        getParams(&m_recoveryDelayMs, &m_maxRecoveryAttempts);
-        CLog::Log(LOGINFO,
-                  "CActiveAEDSP::Init — recovery params from chain.json: "
-                  "delay={}ms, maxAttempts={}",
-                  m_recoveryDelayMs, m_maxRecoveryAttempts);
-      }
-      else
-      {
-        CLog::Log(LOGINFO,
-                  "CActiveAEDSP::Init — ADDON_GetRecoveryParams not found; "
-                  "using defaults: delay={}ms, maxAttempts={}",
-                  m_recoveryDelayMs, m_maxRecoveryAttempts);
-      }
+      getParams(&m_recoveryDelayMs, &m_maxRecoveryAttempts);
+      CLog::Log(LOGINFO,
+                "CActiveAEDSP::Init — recovery params from chain.json: "
+                "delay={}ms, maxAttempts={}",
+                m_recoveryDelayMs, m_maxRecoveryAttempts);
     }
     else
     {
-      CLog::Log(LOGWARNING,
-                "CActiveAEDSP::Init — GetModuleHandleExW failed (error {}); "
-                "cannot retrieve recovery params, using defaults: delay={}ms, maxAttempts={}",
-                GetLastError(), m_recoveryDelayMs, m_maxRecoveryAttempts);
+      CLog::Log(LOGINFO,
+                "CActiveAEDSP::Init — ADDON_GetRecoveryParams not found; "
+                "using defaults: delay={}ms, maxAttempts={}",
+                m_recoveryDelayMs, m_maxRecoveryAttempts);
     }
   }
 
@@ -273,14 +251,17 @@ void CActiveAEDSP::Deinit()
 
   StreamDestroy();
 
-  if (m_dll)
+  if (m_hDll)
   {
     CLog::Log(LOGINFO,
               "CActiveAEDSP::Deinit — calling ADDON_Destroy; "
               "named pipe \\\\.\\pipe\\kodi_vsthost_editor will stop");
-    m_dll->Destroy();
-    delete m_dll;
-    m_dll = nullptr;
+    using ADDON_Destroy_t = void (__cdecl*)();
+    auto destroyFn = reinterpret_cast<ADDON_Destroy_t>(GetProcAddress(m_hDll, "ADDON_Destroy"));
+    if (destroyFn)
+      destroyFn();
+    FreeLibrary(m_hDll);
+    m_hDll = nullptr;
   }
 
   std::memset(m_funcs, 0, sizeof(AudioDSP));
@@ -536,7 +517,7 @@ bool CActiveAEDSP::TryReset(const AEAudioFormat& fmt)
               "force-clearing add-on state",
               attempt);
     // Manually null out all state without invoking DLL functions.
-    m_dll          = nullptr;
+    m_hDll         = nullptr;
     m_streamActive = false;
     m_initialized  = false;
     std::memset(m_funcs, 0, sizeof(AudioDSP));

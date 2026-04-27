@@ -9,7 +9,7 @@
   </requires>
 
   <extension point="xbmc.audiodsp"
-             library_win="audiodsp.vsthost.dll">
+             library_windows="audiodsp.vsthost.dll">
   </extension>
 
   <extension point="xbmc.addon.metadata">
