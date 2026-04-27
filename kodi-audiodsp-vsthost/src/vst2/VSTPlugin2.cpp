@@ -488,10 +488,17 @@ bool VSTPlugin2::openEditor(void* parentWindow)
     // Validate the parent window handle before passing it to the plugin.
     // A null or already-destroyed HWND would cause the plugin to embed into
     // an invalid window, producing no visible UI and potentially crashing.
-    if (!parentWindow || !IsWindow(static_cast<HWND>(parentWindow)))
+    if (!parentWindow)
     {
         VSTLOG(VSTLOG_ERROR,
-               "[VSTPlugin2] openEditor — invalid parent HWND (%p) for '%s'",
+               "[VSTPlugin2] openEditor — null parent HWND for '%s'",
+               m_name.c_str());
+        return false;
+    }
+    if (!IsWindow(static_cast<HWND>(parentWindow)))
+    {
+        VSTLOG(VSTLOG_ERROR,
+               "[VSTPlugin2] openEditor — parent HWND (%p) is not a valid window for '%s'",
                parentWindow, m_name.c_str());
         return false;
     }
