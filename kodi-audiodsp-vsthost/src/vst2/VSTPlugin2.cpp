@@ -485,6 +485,17 @@ bool VSTPlugin2::openEditor(void* parentWindow)
     if (!m_loaded || !m_effect || !hasEditor())
         return false;
 
+    // Validate the parent window handle before passing it to the plugin.
+    // A null or already-destroyed HWND would cause the plugin to embed into
+    // an invalid window, producing no visible UI and potentially crashing.
+    if (!parentWindow || !IsWindow(static_cast<HWND>(parentWindow)))
+    {
+        VSTLOG(VSTLOG_ERROR,
+               "[VSTPlugin2] openEditor — invalid parent HWND (%p) for '%s'",
+               parentWindow, m_name.c_str());
+        return false;
+    }
+
     VSTLOG(VSTLOG_DEBUG, "[VSTPlugin2] openEditor — calling effEditOpen for '%s'", m_name.c_str());
 
     VstIntPtr result = callEditOpenSafe(m_effect, parentWindow);
@@ -498,6 +509,18 @@ bool VSTPlugin2::openEditor(void* parentWindow)
 
     VSTLOG(VSTLOG_DEBUG, "[VSTPlugin2] openEditor — effEditOpen returned %lld for '%s'",
            static_cast<long long>(result), m_name.c_str());
+
+    // VST2 plugins embed their UI by calling SetParent() inside effEditOpen;
+    // the host never receives a child HWND back from the dispatcher.
+    // Probe for a child window to confirm the plugin actually attached its UI.
+    HWND child = GetWindow(static_cast<HWND>(parentWindow), GW_CHILD);
+    if (!child)
+    {
+        VSTLOG(VSTLOG_WARN,
+               "[VSTPlugin2] openEditor — effEditOpen returned %lld but no child window appeared "
+               "in host HWND for '%s'; the editor UI may be blank",
+               static_cast<long long>(result), m_name.c_str());
+    }
 
     // Store the host HWND so audioMasterSizeWindow can forward resize requests
     m_editorHwnd = static_cast<HWND>(parentWindow);
