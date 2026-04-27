@@ -26,6 +26,7 @@
 #include "addons/binary-addons/AddonDll.h"
 #include "filesystem/Directory.h"
 #include "filesystem/SpecialProtocol.h"
+#include "platform/win32/CharsetConverter.h"
 #include "utils/log.h"
 
 // Legacy ADSP add-on API (from kodi-audiodsp-vsthost/include/kodi-legacy-adsp/)
@@ -116,8 +117,7 @@ bool CActiveAEDSP::Init()
   // host-callback stubs), so nullptr is safe as the host-callbacks argument.
   // If a future ADSP add-on needs host callbacks this approach must be revisited.
   {
-    const std::wstring wlibPath(libPath.begin(), libPath.end());
-    m_hDll = LoadLibraryW(wlibPath.c_str());
+    m_hDll = LoadLibraryW(KODI::PLATFORM::WINDOWS::ToW(libPath).c_str());
   }
   if (!m_hDll)
   {
