@@ -352,8 +352,19 @@ void EditorBridge::uiThreadLoop()
     MSG msg;
     __try
     {
-    while (GetMessageW(&msg, nullptr, 0, 0))
+    BOOL gmRet;
+    while ((gmRet = GetMessageW(&msg, nullptr, 0, 0)) != 0)
     {
+        if (gmRet == -1)
+        {
+            // GetMessageW error — should not happen in normal operation
+            VSTLOG(VSTLOG_ERROR,
+                   "EditorBridge::uiThreadLoop — GetMessageW returned -1 (error %lu); UI thread exiting",
+                   GetLastError());
+            m_running = false;
+            break;
+        }
+
         // Handle our custom messages
         if (msg.hwnd == nullptr)
         {
@@ -452,7 +463,7 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
     if (!plugin || !plugin->hasEditor())
         return;
 
-    // Get editor size (pre-open query — may return 0×0 for some plugins until
+    // Get editor size (pre-open query — may return 0x0 for some plugins until
     // after effEditOpen; we use it to size the initial window and re-query after open)
     int editorW = 640, editorH = 480;
     bool preOpenSizeValid = plugin->getEditorSize(editorW, editorH);

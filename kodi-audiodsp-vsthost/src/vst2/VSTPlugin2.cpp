@@ -182,7 +182,6 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
     // --- 13. Initialise VstTimeInfo so audioMasterGetTime returns valid data ------
     m_timeInfo = {};
     m_timeInfo.sampleRate         = m_sampleRate;
-    m_timeInfo.samplePos          = 0.0;
     m_timeInfo.tempo              = 120.0;
     m_timeInfo.timeSigNumerator   = 4;
     m_timeInfo.timeSigDenominator = 4;
@@ -622,7 +621,7 @@ VstIntPtr VSTPlugin2::audioMaster(
         return 1000;
 
     case audioMasterCanDo:
-        // We do not support MIDI, time info automation, or other optional features
+        // We do not support MIDI, automation, or other optional host features
         return 0;
 
     default:
