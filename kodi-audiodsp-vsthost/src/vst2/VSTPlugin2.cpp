@@ -71,6 +71,20 @@ VstIntPtr VSTPlugin2::callEditOpenSafe(AEffect* effect, void* parentWindow)
     return result;
 }
 
+bool VSTPlugin2::callEditGetRectSafe(AEffect* effect, ERect** rectOut)
+{
+    if (!effect || !rectOut)
+        return false;
+    __try {
+        *rectOut = nullptr;
+        effect->dispatcher(effect, effEditGetRect, 0, 0, rectOut, 0.0f);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *rectOut = nullptr;
+        return false;
+    }
+    return *rectOut != nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // load()
 // ---------------------------------------------------------------------------
@@ -477,12 +491,17 @@ bool VSTPlugin2::hasEditor() const
 {
     if (!m_loaded || !m_effect)
         return false;
-    return (m_effect->flags & effFlagsHasEditor) != 0;
+
+    if ((m_effect->flags & effFlagsHasEditor) != 0)
+        return true;
+
+    ERect* rect = nullptr;
+    return callEditGetRectSafe(m_effect, &rect);
 }
 
 bool VSTPlugin2::openEditor(void* parentWindow)
 {
-    if (!m_loaded || !m_effect || !hasEditor())
+    if (!m_loaded || !m_effect)
         return false;
 
     // Validate the parent window handle before passing it to the plugin.
@@ -543,11 +562,12 @@ void VSTPlugin2::closeEditor()
 
 bool VSTPlugin2::getEditorSize(int& width, int& height) const
 {
-    if (!m_loaded || !m_effect || !hasEditor())
+    if (!m_loaded || !m_effect)
         return false;
 
     ERect* rect = nullptr;
-    m_effect->dispatcher(m_effect, effEditGetRect, 0, 0, &rect, 0.0f);
+    if (!callEditGetRectSafe(m_effect, &rect))
+        return false;
     if (!rect)
         return false;
 
@@ -651,8 +671,23 @@ VstIntPtr VSTPlugin2::audioMaster(
         return 1000;
 
     case audioMasterCanDo:
-        // We do not support MIDI, automation, or other optional host features
+    {
+        const char* feature = static_cast<const char*>(ptr);
+        if (!feature)
+            return 0;
+        if (std::strcmp(feature, "sizeWindow") == 0 ||
+            std::strcmp(feature, "sendVstEvents") == 0 ||
+            std::strcmp(feature, "sendVstMidiEvent") == 0 ||
+            std::strcmp(feature, "receiveVstEvents") == 0 ||
+            std::strcmp(feature, "receiveVstMidiEvent") == 0 ||
+            std::strcmp(feature, "sendVstTimeInfo") == 0 ||
+            std::strcmp(feature, "receiveVstTimeInfo") == 0 ||
+            std::strcmp(feature, "conformsToWindowRules") == 0)
+        {
+            return 1;
+        }
         return 0;
+    }
 
     default:
         VSTLOG(VSTLOG_DEBUG,

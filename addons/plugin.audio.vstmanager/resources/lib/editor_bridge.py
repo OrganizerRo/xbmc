@@ -122,6 +122,25 @@ def close_all_editors():
     """Request the C++ addon to close all open VST editor windows."""
     return _send_command({'cmd': 'close_all'})
 
+def list_parameters(plugin_path):
+    """Request all plugin parameters from the C++ EditorBridge."""
+    return _send_command({'cmd': 'list_params', 'path': plugin_path})
+
+
+def get_parameter(plugin_path, index):
+    """Request a single plugin parameter from the C++ EditorBridge."""
+    return _send_command({'cmd': 'get_param', 'path': plugin_path, 'index': int(index)})
+
+
+def set_parameter(plugin_path, index, value):
+    """Set a single plugin parameter via the C++ EditorBridge."""
+    return _send_command({
+        'cmd': 'set_param',
+        'path': plugin_path,
+        'index': int(index),
+        'value': float(value),
+    })
+
 
 def ping():
     """Check if the EditorBridge is reachable.

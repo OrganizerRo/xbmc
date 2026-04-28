@@ -50,6 +50,8 @@ from chain_manager import ChainManager      # noqa: E402
 from plugin_scanner import PluginScanner    # noqa: E402
 from editor_bridge import open_editor as bridge_open_editor   # noqa: E402
 from editor_bridge import close_editor as bridge_close_editor  # noqa: E402
+from editor_bridge import list_parameters as bridge_list_parameters  # noqa: E402
+from editor_bridge import set_parameter as bridge_set_parameter  # noqa: E402
 
 # Shared data directory with the C++ audiodsp.vsthost ADSP addon
 VSTHOST_DATA = _translate_path(
@@ -240,7 +242,9 @@ def show_vst_ui(params):
             # window (including the X close button).  Nothing more to do here.
             log('Opened native VST editor for: %s' % name)
             return
-        # Plugin has no editor — fall through to metadata dialog
+        # Plugin has no editor — try the parameter fallback UI first
+        if _show_parameter_fallback(name, path):
+            return
 
     # Fallback: show metadata dialog (bridge unreachable or no editor)
     heading = 'VST Plugin - %s' % name
@@ -249,6 +253,72 @@ def show_vst_ui(params):
     line3 = 'Status: Active in audio chain'
 
     xbmcgui.Dialog().ok(heading, line1, line2, line3)
+
+
+def _show_parameter_fallback(name, path):
+    """Interactive parameter editor fallback when native GUI is unavailable."""
+    dialog = xbmcgui.Dialog()
+
+    while True:
+        result = bridge_list_parameters(path)
+        if not result or result.get('status') != 'ok':
+            return False
+
+        params = result.get('params') or []
+        if not params:
+            return False
+
+        entries = []
+        for p in params:
+            idx = int(p.get('index', 0))
+            pname = p.get('name') or ('Param %d' % idx)
+            try:
+                pval = float(p.get('value', 0.0))
+            except Exception:
+                pval = 0.0
+            entries.append('%03d: %s = %.4f' % (idx, pname, pval))
+        entries.append('[Done]')
+
+        choice = dialog.select('VST Parameters - %s' % name, entries)
+        if choice < 0 or choice >= len(params):
+            return True
+
+        param = params[choice]
+        idx = int(param.get('index', 0))
+        pname = param.get('name') or ('Param %d' % idx)
+        try:
+            current = float(param.get('value', 0.0))
+        except Exception:
+            current = 0.0
+
+        raw = dialog.input('Set %s (0.0 - 1.0)' % pname,
+                           '%.6f' % current,
+                           type=xbmcgui.INPUT_ALPHANUM)
+        if not raw:
+            continue
+
+        try:
+            value = float(raw)
+        except Exception:
+            xbmcgui.Dialog().notification(
+                'VST Manager',
+                'Invalid numeric value',
+                xbmcgui.NOTIFICATION_ERROR,
+                2000)
+            continue
+
+        if value < 0.0:
+            value = 0.0
+        if value > 1.0:
+            value = 1.0
+
+        set_result = bridge_set_parameter(path, idx, value)
+        if not set_result or set_result.get('status') != 'ok':
+            xbmcgui.Dialog().notification(
+                'VST Manager',
+                'Failed to set parameter',
+                xbmcgui.NOTIFICATION_ERROR,
+                2000)
 
 
 def close_vst_ui(params):
