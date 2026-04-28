@@ -97,14 +97,9 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
                chainIndex, addedSlot.path.c_str(), formatName);
     }
 
-    std::ostringstream chainSummary;
-    chainSummary << "[DSPChain] addPlugin: chain order after insert";
-    for (size_t i = 0; i < m_plugins.size(); ++i)
-    {
-        const auto& chainSlot = m_plugins[i];
-        chainSummary << " [" << i << "]='" << chainSlot.path << "'";
-    }
-    VSTLOG(VSTLOG_DEBUG, "%s", chainSummary.str().c_str());
+    VSTLOG(VSTLOG_DEBUG,
+           "[DSPChain] addPlugin: chain now contains %d plugin(s)",
+           static_cast<int>(m_plugins.size()));
     return true;
 }
 
