@@ -501,7 +501,7 @@ bool VSTPlugin2::hasEditor() const
 
 bool VSTPlugin2::openEditor(void* parentWindow)
 {
-    if (!m_loaded || !m_effect)
+    if (!m_loaded || !m_effect || !hasEditor())
         return false;
 
     // Validate the parent window handle before passing it to the plugin.
