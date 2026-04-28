@@ -117,7 +117,7 @@ enum {
     audioMasterProcessEvents          =  8,  // ptr = VstEvents* to send to host
     // 9-12 = deprecated
     audioMasterIOChanged              = 13,  // plugin changed numInputs/numOutputs/latency
-    // 14 = deprecated
+    audioMasterNeedIdle               = 14,  // legacy: plugin requests regular idle calls
     audioMasterSizeWindow             = 15,  // index=width, value=height — resize editor
     audioMasterGetSampleRate          = 16,  // returns current sample rate
     audioMasterGetBlockSize           = 17,  // returns current block size
@@ -130,7 +130,9 @@ enum {
     // 35-36 = reserved
     audioMasterCanDo                  = 37,  // ptr = feature string; returns 1/-1/0
     audioMasterGetLanguage            = 38,  // returns VstHostLanguage enum value
-    // 39-41 = reserved
+    audioMasterOpenWindow             = 39,  // legacy: plugin asks host to open a window (ptr=VstWindow*)
+    audioMasterCloseWindow            = 40,  // legacy: plugin asks host to close a window (ptr=VstWindow*)
+    audioMasterGetDirectory           = 41,  // returns plugin directory (char*)
     audioMasterUpdateDisplay          = 42,  // plugin requests host to refresh parameter display
     audioMasterBeginEdit              = 43,  // index = param — user began touching knob
     audioMasterEndEdit                = 44,  // index = param — user released knob
@@ -326,6 +328,24 @@ struct ERect {
     short left;
     short bottom;
     short right;
+};
+
+// ---------------------------------------------------------------------------
+// VstWindow — legacy host window descriptor used with audioMasterOpenWindow /
+// audioMasterCloseWindow. Deprecated in VST2.4 but required by some plugins.
+// ---------------------------------------------------------------------------
+
+struct VstWindow {
+    char     title[128];   // Window title text (ASCII/ANSI)
+    short    xPos;         // Requested left position relative to parent
+    short    yPos;         // Requested top position relative to parent
+    short    width;        // Requested client width
+    short    height;       // Requested client height
+    VstInt32 style;        // Legacy style flags (host/plugin-defined)
+    void*    parent;       // Parent platform window handle (provided by plugin)
+    void*    userHandle;   // Plugin-owned user data/handle
+    void*    winHandle;    // Host-created window handle (filled by host)
+    char     future[104];  // Reserved padding for ABI compatibility
 };
 
 // ---------------------------------------------------------------------------

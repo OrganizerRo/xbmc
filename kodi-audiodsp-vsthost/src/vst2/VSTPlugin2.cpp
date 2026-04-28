@@ -97,6 +97,8 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
     m_sampleRate  = sampleRate;
     m_blockSize   = maxBlockSize;
     m_numChannels = numChannels;
+    m_pluginDirectory.clear();
+    m_pluginDirectoryBuffer.clear();
 
     // --- 1. Load the DLL -------------------------------------------------------
     // Convert UTF-8 path to wide string for LoadLibraryW
@@ -193,6 +195,22 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
     // --- 12. Allocate scratch buffers --------------------------------------------
     allocateScratchBuffers();
 
+    // --- 12b. Cache plugin directory for audioMasterGetDirectory -----------------
+    try
+    {
+        m_pluginDirectory = std::filesystem::path(m_path).parent_path().string();
+        m_pluginDirectoryBuffer.assign(m_pluginDirectory.begin(), m_pluginDirectory.end());
+        m_pluginDirectoryBuffer.push_back('\0');
+    }
+    catch (...)
+    {
+        m_pluginDirectory.clear();
+        m_pluginDirectoryBuffer.clear();
+        VSTLOG(VSTLOG_WARN,
+               "[VSTPlugin2] Failed to derive plugin directory for '%s'",
+               m_path.c_str());
+    }
+
     // --- 13. Initialise VstTimeInfo so audioMasterGetTime returns valid data ------
     m_timeInfo = {};
     m_timeInfo.sampleRate         = m_sampleRate;
@@ -219,6 +237,8 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
 
 void VSTPlugin2::unload()
 {
+    closeAuxWindows();
+
     if (m_effect) {
         if (m_active) {
             m_effect->dispatcher(m_effect, effMainsChanged, 0, 0, nullptr, 0.0f);
@@ -240,6 +260,17 @@ void VSTPlugin2::unload()
     m_outputBufs.clear();
     m_inputPtrs.clear();
     m_outputPtrs.clear();
+}
+
+void VSTPlugin2::closeAuxWindows()
+{
+    std::lock_guard<std::mutex> lock(m_auxWindowMutex);
+    for (HWND hwnd : m_auxWindows)
+    {
+        if (hwnd && IsWindow(hwnd))
+            DestroyWindow(hwnd);
+    }
+    m_auxWindows.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -524,12 +555,18 @@ bool VSTPlugin2::openEditor(void* parentWindow)
 
     VSTLOG(VSTLOG_DEBUG, "[VSTPlugin2] openEditor — calling effEditOpen for '%s'", m_name.c_str());
 
+    // Store early so audioMasterOpenWindow can resolve primary-window requests
+    // that arrive during effEditOpen.
+    m_editorHwnd = static_cast<HWND>(parentWindow);
+    m_inEffEditOpen = true;
     VstIntPtr result = callEditOpenSafe(m_effect, parentWindow);
+    m_inEffEditOpen = false;
     if (result == -1)
     {
         VSTLOG(VSTLOG_ERROR,
                "[VSTPlugin2] openEditor — effEditOpen threw a structured exception in '%s'",
                m_name.c_str());
+        m_editorHwnd = nullptr;
         return false;
     }
 
@@ -548,8 +585,7 @@ bool VSTPlugin2::openEditor(void* parentWindow)
                static_cast<long long>(result), m_name.c_str());
     }
 
-    // Store the host HWND so audioMasterSizeWindow can forward resize requests
-    m_editorHwnd = static_cast<HWND>(parentWindow);
+    // Host HWND already stored before effEditOpen.
     return true;
 }
 
@@ -557,6 +593,7 @@ void VSTPlugin2::closeEditor()
 {
     if (m_loaded && m_effect)
         m_effect->dispatcher(m_effect, effEditClose, 0, 0, nullptr, 0.0f);
+    closeAuxWindows();
     m_editorHwnd = nullptr;
 }
 
@@ -625,6 +662,10 @@ VstIntPtr VSTPlugin2::audioMaster(
         // Plugin requests idle time — nothing to do in a realtime host.
         return 0;
 
+    case audioMasterNeedIdle:
+        // Legacy compatibility hint; EditorBridge already pumps effEditIdle.
+        return 1;
+
     case audioMasterGetTime:
         // Return a pointer to our VstTimeInfo struct.  The plugin must not
         // free or cache this pointer across calls; it is always valid for the
@@ -644,6 +685,97 @@ VstIntPtr VSTPlugin2::audioMaster(
                         static_cast<WPARAM>(index),
                         static_cast<LPARAM>(value));
         }
+        return 1;
+
+    case audioMasterOpenWindow:
+    {
+        auto* window = static_cast<VstWindow*>(ptr);
+        if (!window)
+            return 0;
+
+        // Some plugins issue this during effEditOpen for the primary editor.
+        if (m_inEffEditOpen && m_editorHwnd && IsWindow(m_editorHwnd))
+        {
+            VSTLOG(VSTLOG_DEBUG,
+                   "[VSTPlugin2] audioMasterOpenWindow — mapped primary editor request to host HWND %p for '%s'",
+                   static_cast<void*>(m_editorHwnd), m_name.c_str());
+            window->parent = reinterpret_cast<void*>(m_editorHwnd);
+            window->winHandle = reinterpret_cast<void*>(m_editorHwnd);
+            return reinterpret_cast<VstIntPtr>(m_editorHwnd);
+        }
+
+        HWND parent = static_cast<HWND>(window->parent);
+        if (!parent || !IsWindow(parent))
+            parent = m_editorHwnd;
+        if (!parent || !IsWindow(parent))
+            return 0;
+
+        const int w = (window->width > 0) ? window->width : 320;
+        const int h = (window->height > 0) ? window->height : 240;
+        char title[129] = {};
+        std::memcpy(title, window->title, sizeof(window->title));
+        title[128] = '\0';
+        // Use a simple child container window; plugins that need richer
+        // behavior can still attach their own child hierarchy under it.
+        HWND hwnd = CreateWindowExA(0,
+                                    "STATIC",
+                                    title[0] ? title : "VST",
+                                    WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                                    window->xPos,
+                                    window->yPos,
+                                    w,
+                                    h,
+                                    parent,
+                                    nullptr,
+                                    GetModuleHandleA(nullptr),
+                                    nullptr);
+        if (!hwnd)
+            return 0;
+
+        window->parent = reinterpret_cast<void*>(parent);
+        window->winHandle = reinterpret_cast<void*>(hwnd);
+
+        {
+            std::lock_guard<std::mutex> lock(m_auxWindowMutex);
+            m_auxWindows.insert(hwnd);
+        }
+
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
+        return reinterpret_cast<VstIntPtr>(hwnd);
+    }
+
+    case audioMasterCloseWindow:
+    {
+        auto* window = static_cast<VstWindow*>(ptr);
+        if (!window || !window->winHandle)
+            return 0;
+
+        HWND hwnd = static_cast<HWND>(window->winHandle);
+        if (hwnd == m_editorHwnd)
+        {
+            window->winHandle = nullptr;
+            return 1;
+        }
+        bool knownWindow = false;
+        {
+            std::lock_guard<std::mutex> lock(m_auxWindowMutex);
+            knownWindow = (m_auxWindows.erase(hwnd) > 0);
+        }
+        const bool destroyed = (hwnd && DestroyWindow(hwnd) != 0);
+        window->winHandle = nullptr;
+        // Return success when we either tracked the window ourselves or
+        // successfully destroyed a valid handle supplied by the plugin.
+        return (knownWindow || destroyed) ? 1 : 0;
+    }
+
+    case audioMasterGetDirectory:
+        return reinterpret_cast<VstIntPtr>(
+            m_pluginDirectoryBuffer.empty() ? nullptr : m_pluginDirectoryBuffer.data());
+
+    case audioMasterUpdateDisplay:
+        if (m_editorHwnd && IsWindow(m_editorHwnd))
+            PostMessage(m_editorHwnd, WM_USER + 104, 0, 0);
         return 1;
 
     case audioMasterGetSampleRate:
@@ -668,12 +800,17 @@ VstIntPtr VSTPlugin2::audioMaster(
     case audioMasterGetVendorVersion:
         return 1000;
 
+    case audioMasterGetLanguage:
+        return 1; // English
+
     case audioMasterCanDo:
     {
         const char* feature = static_cast<const char*>(ptr);
         if (!feature)
             return 0;
         if (std::strcmp(feature, "sizeWindow") == 0 ||
+            std::strcmp(feature, "openWindow") == 0 ||
+            std::strcmp(feature, "closeWindow") == 0 ||
             std::strcmp(feature, "sendVstEvents") == 0 ||
             std::strcmp(feature, "sendVstMidiEvent") == 0 ||
             std::strcmp(feature, "receiveVstEvents") == 0 ||

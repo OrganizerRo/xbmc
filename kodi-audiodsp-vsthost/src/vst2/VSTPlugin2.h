@@ -12,6 +12,8 @@
 
 #include <string>
 #include <vector>
+#include <mutex>
+#include <unordered_set>
 #include <windows.h>
 
 // Function pointer type for the VST2 plugin entry point
@@ -117,6 +119,9 @@ private:
     /// to match m_numChannels × m_blockSize.
     void allocateScratchBuffers();
 
+    /// Destroy any legacy auxiliary windows created via audioMasterOpenWindow.
+    void closeAuxWindows();
+
     // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
@@ -143,6 +148,18 @@ private:
     // HWND of the host window that was passed to openEditor(); used to forward
     // audioMasterSizeWindow resize requests back to EditorBridge via PostMessage.
     HWND m_editorHwnd = nullptr;
+
+    // Guard to distinguish primary editor open from legacy secondary window
+    // requests that can happen during effEditOpen.
+    bool m_inEffEditOpen = false;
+
+    // Stable buffer for audioMasterGetDirectory.
+    std::string m_pluginDirectory;
+    std::vector<char> m_pluginDirectoryBuffer;
+
+    // Legacy auxiliary windows requested by audioMasterOpenWindow.
+    std::unordered_set<HWND> m_auxWindows;
+    std::mutex               m_auxWindowMutex;
 
     // Scratch buffers — allocated once in load(), reused every process() call
     std::vector<std::vector<float>> m_inputBufs;

@@ -98,6 +98,7 @@ private:
     static constexpr UINT  WM_VSTBRIDGE_CLOSE  = WM_USER + 101;
     static constexpr UINT  WM_VSTBRIDGE_QUIT   = WM_USER + 102;
     static constexpr UINT  WM_VSTBRIDGE_RESIZE = WM_USER + 103;  // WPARAM=width, LPARAM=height
+    static constexpr UINT  WM_VSTBRIDGE_REFRESH = WM_USER + 104; // plugin requested UI refresh
     static constexpr UINT  EDITOR_IDLE_TIMER   = 1;
     static constexpr UINT  EDITOR_IDLE_MS      = 30;
     /// Maximum milliseconds to wait for the UI thread or pipe thread to start.
