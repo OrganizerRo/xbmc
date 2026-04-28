@@ -21,6 +21,9 @@ jobs:
     runs-on: windows-2022
     env:
       WORKSPACE: ${{ github.workspace }}
+      KODI_MIRRORS: https://mirrors.kodi.tv/ https://ftp.fau.de/xbmc/
+      KODI_DOWNLOAD_RETRIES: 3
+      KODI_RETRY_DELAY_SECONDS: 15
 
     steps:
       - name: Checkout
@@ -94,7 +97,7 @@ jobs:
       # find zlib via -I/depends/win32/include -LIBPATH:/depends/win32/lib.
       - name: Download build dependencies (pre-FFmpeg)
         shell: cmd
-        run: call tools\buildsteps\windows\download-dependencies.bat
+        run: call tools\buildsteps\windows\download-dependencies-with-retry.bat
 
       # ---------------------------------------------------------------
       # MinGW build (cache miss only)
@@ -214,7 +217,7 @@ jobs:
       # existing files so this is a no-op / safety net).
       - name: Download build dependencies
         shell: cmd
-        run: call tools\buildsteps\windows\download-dependencies.bat
+        run: call tools\buildsteps\windows\download-dependencies-with-retry.bat
 
       # Leia has CMakeLists.txt at repo root; use an out-of-source build dir.
       # -DENABLE_INTERNAL_FFMPEG=OFF forces CMake to use the externally-built
