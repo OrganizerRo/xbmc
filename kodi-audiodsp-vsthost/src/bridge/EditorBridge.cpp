@@ -657,6 +657,13 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
         return;
     }
 
+    // Show the host window *before* calling effEditOpen.
+    // Some VST 1 / VST 2.x plugins check IsWindowVisible() on the parent HWND
+    // inside effEditOpen and will not embed their UI if the window is hidden.
+    // This matches the pattern used by Arakula's reference vsthost implementation.
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+
     // Open the VST editor inside our window
     if (!plugin->openEditor(static_cast<void*>(hwnd)))
     {
@@ -727,8 +734,7 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
         }
     }
 
-    // Show the window
-    ShowWindow(hwnd, SW_SHOW);
+    // Force a repaint after centering so any deferred WM_PAINT is delivered.
     UpdateWindow(hwnd);
 }
 

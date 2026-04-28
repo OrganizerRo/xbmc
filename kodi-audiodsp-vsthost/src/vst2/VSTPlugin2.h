@@ -101,10 +101,11 @@ private:
     /// in the same scope — see implementation comment.
     AEffect* callPluginMainSafe(VSTENTRYPROC proc);
 
-    /// Call effEditOpen inside an SEH frame.  Returns the dispatcher result on
-    /// success, or -1 if the plugin threw a structured exception.  Must NOT
-    /// have C++ objects with destructors in the same scope (MSVC C4509).
-    static VstIntPtr callEditOpenSafe(AEffect* effect, void* parentWindow);
+    /// Call effEditOpen inside an SEH frame.
+    /// @param[out] outException  Set to true if the plugin threw a structured exception;
+    ///             false on clean return (even if the plugin returns -1 as a value).
+    ///             Must NOT have C++ objects with destructors in the same scope (MSVC C4509).
+    static VstIntPtr callEditOpenSafe(AEffect* effect, void* parentWindow, bool& outException);
 
     /// Call effEditGetRect inside an SEH frame. Returns true if a rect pointer
     /// was returned without throwing; false otherwise.
@@ -141,8 +142,24 @@ private:
     VstTimeInfo m_timeInfo{};
 
     // HWND of the host window that was passed to openEditor(); used to forward
-    // audioMasterSizeWindow resize requests back to EditorBridge via PostMessage.
+    // audioMasterSizeWindow resize requests back to EditorBridge via PostMessage,
+    // and to service the legacy audioMasterOpenWindow callback by reusing this
+    // window when called during effEditOpen.
     HWND m_editorHwnd = nullptr;
+
+    // True while callEditOpenSafe() is executing, so the audioMasterOpenWindow
+    // handler knows it is being called during effEditOpen (primary-editor request)
+    // vs. at idle time (secondary-window request).
+    bool m_inEffEditOpen = false;
+
+    // Auxiliary windows created via the deprecated audioMasterOpenWindow callback
+    // (VST 1 / VST 2.0/2.1 era plugins that call this from idle for secondary UI).
+    // All are closed in closeEditor().
+    std::vector<HWND> m_auxWindows;
+
+    // Directory containing the plugin DLL; returned by audioMasterGetDirectory.
+    // Populated in load() and valid for the lifetime of the VSTPlugin2 instance.
+    std::string m_pluginDir;
 
     // Scratch buffers — allocated once in load(), reused every process() call
     std::vector<std::vector<float>> m_inputBufs;

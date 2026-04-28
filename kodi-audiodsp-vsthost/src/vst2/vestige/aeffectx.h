@@ -137,6 +137,26 @@ enum {
 };
 
 // ---------------------------------------------------------------------------
+// Deprecated VST 2.0/2.1 audioMaster opcodes
+//
+// These were removed in VST 2.4 but are still sent by many older (VST 1 /
+// VST 2.0/2.1 era) plugins.  Values are from the original Steinberg SDK 2.3
+// and cross-referenced with lsp-plugins/lsp-3rd-party and Arakula/vsthost.
+//   14 = audioMasterNeedIdle      (vestige marks "14 = deprecated")
+//   38 = audioMasterGetLanguage   (already in the main enum above)
+//   39 = audioMasterOpenWindow    (between GetLanguage and UpdateDisplay)
+//   40 = audioMasterCloseWindow
+//   41 = audioMasterGetDirectory
+// ---------------------------------------------------------------------------
+
+enum {
+    audioMasterNeedIdle    = 14,  // deprecated: plugin needs idle calls; return 1
+    audioMasterOpenWindow  = 39,  // deprecated: plugin requests a host-created window
+    audioMasterCloseWindow = 40,  // deprecated: plugin requests host to close the window
+    audioMasterGetDirectory = 41, // deprecated: host returns char* to plugin directory
+};
+
+// ---------------------------------------------------------------------------
 // VstTimeInfo flags
 // ---------------------------------------------------------------------------
 
@@ -337,5 +357,30 @@ struct ERect {
 // ---------------------------------------------------------------------------
 
 typedef AEffect* (VSTCALLBACK* VSTPluginMainProc)(audioMasterCallback hostCallback);
+
+// ---------------------------------------------------------------------------
+// VstWindow — passed via ptr in audioMasterOpenWindow / audioMasterCloseWindow
+//
+// VST 2.0/2.1 plugins that do not use the parent HWND passed to effEditOpen
+// call audioMasterOpenWindow to request the host to create a floating window.
+// The host fills winHandle with the HWND it created and returns it.
+//
+// @deprecated since VST 2.4 — replaced by the standard effEditOpen/SetParent
+//   approach, but still used by a significant number of older plugins.
+// ---------------------------------------------------------------------------
+
+struct VstWindow
+{
+    char  title[128];   // window title (ANSI, null-terminated)
+    short xPos;         // initial x position in pixels (host may ignore)
+    short yPos;         // initial y position in pixels (host may ignore)
+    short width;        // requested window width  in pixels
+    short height;       // requested window height in pixels
+    int   style;        // Win32 style flags (host may use or ignore)
+    void* parent;       // parent window handle (usually NULL)
+    void* userHandle;   // plugin-defined; host must not read or modify
+    void* winHandle;    // set by host: the HWND of the created window
+    char  future[104];  // reserved — must be zeroed by the plugin
+};
 
 #endif // AEFFECTX_H

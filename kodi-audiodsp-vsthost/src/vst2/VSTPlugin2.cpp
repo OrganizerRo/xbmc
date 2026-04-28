@@ -57,17 +57,25 @@ AEffect* VSTPlugin2::callPluginMainSafe(VSTENTRYPROC proc)
 // callEditOpenSafe — SEH wrapper for effEditOpen
 //
 // Same rationale as callPluginMainSafe: isolated to avoid MSVC C4509.
-// Returns the dispatcher result, or -1 on structured exception.
+//
+// outException is set to true when the plugin threw a structured exception.
+// The return value is whatever the plugin's dispatcher returned (which some
+// plugins legitimately set to 0 or even -1 to indicate success — the old
+// Arakula reference host intentionally removed the "if (l > 0)" guard for
+// this reason).  Callers must only fail on outException, not on return value.
 // ---------------------------------------------------------------------------
 
-VstIntPtr VSTPlugin2::callEditOpenSafe(AEffect* effect, void* parentWindow)
+VstIntPtr VSTPlugin2::callEditOpenSafe(AEffect* effect, void* parentWindow,
+                                        bool& outException)
 {
-    VstIntPtr result = -1;
+    VstIntPtr result = 0;
+    BOOL threw = FALSE;              // POD — safe inside __try/__except scope
     __try {
         result = effect->dispatcher(effect, effEditOpen, 0, 0, parentWindow, 0.0f);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        result = -1;
+        threw = TRUE;
     }
+    outException = (threw != FALSE);
     return result;
 }
 
@@ -181,6 +189,13 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
                 m_name = m_path;
             }
         }
+    }
+
+    // --- 10b. Cache plugin directory for audioMasterGetDirectory -----------------
+    try {
+        m_pluginDir = std::filesystem::path(m_path).parent_path().string();
+    } catch (...) {
+        m_pluginDir = m_path;
     }
 
     // --- 11. Retrieve vendor string ----------------------------------------------
@@ -524,37 +539,64 @@ bool VSTPlugin2::openEditor(void* parentWindow)
 
     VSTLOG(VSTLOG_DEBUG, "[VSTPlugin2] openEditor — calling effEditOpen for '%s'", m_name.c_str());
 
-    VstIntPtr result = callEditOpenSafe(m_effect, parentWindow);
-    if (result == -1)
+    // Store the HWND *before* calling effEditOpen so that the legacy
+    // audioMasterOpenWindow callback (fired during effEditOpen by VST 1 /
+    // VST 2.0/2.1 era plugins) can reference the host window and embed the
+    // plugin's UI directly into it rather than creating a stray floating window.
+    m_editorHwnd = static_cast<HWND>(parentWindow);
+
+    // Signal that we are inside effEditOpen so audioMasterOpenWindow knows
+    // whether it is handling a primary-editor request (reuse host HWND) or
+    // a secondary/idle-triggered window request (create a new window).
+    m_inEffEditOpen = true;
+
+    bool exceptionOccurred = false;
+    VstIntPtr result = callEditOpenSafe(m_effect, parentWindow, exceptionOccurred);
+
+    m_inEffEditOpen = false;
+
+    if (exceptionOccurred)
     {
+        // Structured exception inside the plugin — abort cleanly.
+        m_editorHwnd = nullptr;
         VSTLOG(VSTLOG_ERROR,
                "[VSTPlugin2] openEditor — effEditOpen threw a structured exception in '%s'",
                m_name.c_str());
         return false;
     }
 
+    // Do NOT fail based on the dispatcher return value alone.  The VST 2.0/2.1
+    // spec is loose here: some plugins return 0 even on success, and others
+    // return -1 as a non-error value.  Arakula's reference host intentionally
+    // removed the "if (l > 0)" guard for this reason.
     VSTLOG(VSTLOG_DEBUG, "[VSTPlugin2] openEditor — effEditOpen returned %lld for '%s'",
            static_cast<long long>(result), m_name.c_str());
 
-    // VST2 plugins embed their UI by calling SetParent() inside effEditOpen;
-    // the host never receives a child HWND back from the dispatcher.
-    // Probe for a child window to confirm the plugin actually attached its UI.
+    // Probe for a child window — diagnostic only; some plugins embed via
+    // SetParent() which we cannot observe directly at this point.
     HWND child = GetWindow(static_cast<HWND>(parentWindow), GW_CHILD);
     if (!child)
     {
         VSTLOG(VSTLOG_WARN,
-               "[VSTPlugin2] openEditor — effEditOpen returned %lld but no child window appeared "
-               "in host HWND for '%s'; the editor UI may be blank",
-               static_cast<long long>(result), m_name.c_str());
+               "[VSTPlugin2] openEditor — no child window in host HWND for '%s'; "
+               "plugin may use legacy audioMasterOpenWindow or deferred embedding",
+               m_name.c_str());
     }
 
-    // Store the host HWND so audioMasterSizeWindow can forward resize requests
-    m_editorHwnd = static_cast<HWND>(parentWindow);
     return true;
 }
 
 void VSTPlugin2::closeEditor()
 {
+    // Destroy any auxiliary windows opened via the legacy audioMasterOpenWindow
+    // callback (VST 1 / VST 2.0/2.1 era plugins that use this for secondary UI).
+    for (HWND hwnd : m_auxWindows)
+    {
+        if (IsWindow(hwnd))
+            DestroyWindow(hwnd);
+    }
+    m_auxWindows.clear();
+
     if (m_loaded && m_effect)
         m_effect->dispatcher(m_effect, effEditClose, 0, 0, nullptr, 0.0f);
     m_editorHwnd = nullptr;
@@ -625,6 +667,11 @@ VstIntPtr VSTPlugin2::audioMaster(
         // Plugin requests idle time — nothing to do in a realtime host.
         return 0;
 
+    case audioMasterNeedIdle:
+        // Deprecated (VST 2.4) — plugin wants idle calls (effIdle / effEditIdle).
+        // We already call effEditIdle on a timer; acknowledge to satisfy the plugin.
+        return 1;
+
     case audioMasterGetTime:
         // Return a pointer to our VstTimeInfo struct.  The plugin must not
         // free or cache this pointer across calls; it is always valid for the
@@ -668,6 +715,9 @@ VstIntPtr VSTPlugin2::audioMaster(
     case audioMasterGetVendorVersion:
         return 1000;
 
+    case audioMasterGetLanguage:
+        return kVstLangEnglish;  // 1
+
     case audioMasterCanDo:
     {
         const char* feature = static_cast<const char*>(ptr);
@@ -680,12 +730,165 @@ VstIntPtr VSTPlugin2::audioMaster(
             std::strcmp(feature, "receiveVstMidiEvent") == 0 ||
             std::strcmp(feature, "sendVstTimeInfo") == 0 ||
             std::strcmp(feature, "receiveVstTimeInfo") == 0 ||
-            std::strcmp(feature, "conformsToWindowRules") == 0)
+            std::strcmp(feature, "conformsToWindowRules") == 0 ||
+            std::strcmp(feature, "supplyIdle") == 0 ||    // legacy idle support
+            std::strcmp(feature, "openWindow") == 0 ||    // legacy audioMasterOpenWindow
+            std::strcmp(feature, "closeWindow") == 0)     // legacy audioMasterCloseWindow
         {
             return 1;
         }
         return 0;
     }
+
+    case audioMasterUpdateDisplay:
+        // Plugin requests host to refresh parameter display.
+        // Acknowledge; the Python side will re-query params on next poll.
+        return 1;
+
+    // -------------------------------------------------------------------------
+    // Legacy VST 2.0/2.1 / VST 1 window management callbacks
+    // -------------------------------------------------------------------------
+
+    case audioMasterOpenWindow:
+    {
+        // Deprecated since VST 2.4.  VST 1 and early VST 2.x plugins use this
+        // to request a host-provided window rather than using the parent HWND
+        // that was passed to effEditOpen.
+        //
+        // Strategy: if we are currently inside effEditOpen (m_inEffEditOpen is
+        // true), reuse the host editor window (m_editorHwnd) and resize it to
+        // match the plugin's requested dimensions.  This embeds the plugin's UI
+        // directly into the host window with no blank/extra window.
+        //
+        // If called at idle time (secondary window request — e.g. a preset
+        // browser triggered by a button click inside the plugin's UI), create a
+        // new standalone window and track it in m_auxWindows so it is destroyed
+        // together with the editor.
+
+        VstWindow* vw = static_cast<VstWindow*>(ptr);
+        if (!vw)
+            return 0;
+
+        if (m_inEffEditOpen && m_editorHwnd && IsWindow(m_editorHwnd))
+        {
+            // Primary-editor request during effEditOpen — reuse host HWND.
+            if (vw->width > 0 && vw->height > 0)
+            {
+                // Resize the host window to fit the plugin's requested client area.
+                RECT wr = {0, 0, vw->width, vw->height};
+                AdjustWindowRectEx(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0);
+                SetWindowPos(m_editorHwnd, nullptr, 0, 0,
+                             wr.right - wr.left, wr.bottom - wr.top,
+                             SWP_NOMOVE | SWP_NOZORDER);
+            }
+            if (vw->title[0] != '\0')
+            {
+                // Update the window title from the plugin's request.
+                wchar_t wtitle[128] = {};
+                MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, 128);
+                SetWindowTextW(m_editorHwnd, wtitle);
+            }
+            vw->winHandle = m_editorHwnd;
+            VSTLOG(VSTLOG_INFO,
+                   "[VSTPlugin2] audioMasterOpenWindow — reusing host HWND %p for '%s'",
+                   m_editorHwnd, m_name.c_str());
+            return reinterpret_cast<VstIntPtr>(m_editorHwnd);
+        }
+
+        // Secondary / idle-time window request — create a new floating window.
+        // Register the auxiliary window class lazily on first use.
+        // Called on the UI thread (effEditIdle / idle path), so no locking needed.
+        static ATOM s_auxClass = 0;
+        if (!s_auxClass)
+        {
+            WNDCLASSEXW wc = {};
+            wc.cbSize        = sizeof(wc);
+            wc.lpfnWndProc   = DefWindowProcW;
+            wc.hInstance     = GetModuleHandleW(nullptr);
+            wc.lpszClassName = L"KodiVSTAux";
+            wc.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
+            wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            s_auxClass = RegisterClassExW(&wc);
+            if (!s_auxClass && GetLastError() == ERROR_CLASS_ALREADY_EXISTS)
+                s_auxClass = static_cast<ATOM>(1);  // already registered
+        }
+
+        const int w = (vw->width  > 0) ? vw->width  : 640;
+        const int h = (vw->height > 0) ? vw->height : 480;
+
+        wchar_t wtitle[128] = L"VST Editor";
+        if (vw->title[0] != '\0')
+            MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, 128);
+
+        RECT wr = {0, 0, w, h};
+        AdjustWindowRectEx(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0);
+
+        HWND auxHwnd = CreateWindowExW(
+            0, L"KodiVSTAux", wtitle, WS_OVERLAPPEDWINDOW,
+            CW_USEDEFAULT, CW_USEDEFAULT,
+            wr.right - wr.left, wr.bottom - wr.top,
+            nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+
+        if (!auxHwnd)
+        {
+            VSTLOG(VSTLOG_ERROR,
+                   "[VSTPlugin2] audioMasterOpenWindow — CreateWindowExW failed "
+                   "for '%s': error %lu", m_name.c_str(), GetLastError());
+            return 0;
+        }
+
+        ShowWindow(auxHwnd, SW_SHOW);
+        UpdateWindow(auxHwnd);
+
+        vw->winHandle = auxHwnd;
+        m_auxWindows.push_back(auxHwnd);
+
+        VSTLOG(VSTLOG_INFO,
+               "[VSTPlugin2] audioMasterOpenWindow — created aux window %p (%dx%d) for '%s'",
+               auxHwnd, w, h, m_name.c_str());
+        return reinterpret_cast<VstIntPtr>(auxHwnd);
+    }
+
+    case audioMasterCloseWindow:
+    {
+        // Deprecated since VST 2.4.  Destroy the window the plugin previously
+        // obtained via audioMasterOpenWindow.
+        VstWindow* vw = static_cast<VstWindow*>(ptr);
+        if (!vw || !vw->winHandle)
+            return 0;
+
+        HWND hwnd = static_cast<HWND>(vw->winHandle);
+
+        // Never destroy the main editor HWND on the plugin's request.
+        if (hwnd == m_editorHwnd)
+        {
+            VSTLOG(VSTLOG_WARN,
+                   "[VSTPlugin2] audioMasterCloseWindow — plugin tried to close "
+                   "the main editor HWND; ignoring for '%s'", m_name.c_str());
+            vw->winHandle = nullptr;
+            return 1;
+        }
+
+        // Remove from aux window tracking.
+        auto it = std::find(m_auxWindows.begin(), m_auxWindows.end(), hwnd);
+        if (it != m_auxWindows.end())
+            m_auxWindows.erase(it);
+
+        if (IsWindow(hwnd))
+            DestroyWindow(hwnd);
+
+        vw->winHandle = nullptr;
+        VSTLOG(VSTLOG_INFO,
+               "[VSTPlugin2] audioMasterCloseWindow — closed window %p for '%s'",
+               hwnd, m_name.c_str());
+        return 1;
+    }
+
+    case audioMasterGetDirectory:
+        // Return a pointer to the null-terminated ANSI directory path.
+        // The string is owned by this VSTPlugin2 instance and valid for its
+        // entire lifetime.
+        return reinterpret_cast<VstIntPtr>(m_pluginDir.c_str());
 
     default:
         VSTLOG(VSTLOG_DEBUG,
