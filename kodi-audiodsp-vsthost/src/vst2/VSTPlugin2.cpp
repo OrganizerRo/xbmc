@@ -785,7 +785,7 @@ VstIntPtr VSTPlugin2::audioMaster(
             {
                 // Update the window title from the plugin's request.
                 wchar_t wtitle[128] = {};
-                MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, 128);
+                MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, _countof(wtitle));
                 SetWindowTextW(m_editorHwnd, wtitle);
             }
             vw->winHandle = m_editorHwnd;
@@ -797,9 +797,11 @@ VstIntPtr VSTPlugin2::audioMaster(
 
         // Secondary / idle-time window request — create a new floating window.
         // Register the auxiliary window class lazily on first use.
-        // Called on the UI thread (effEditIdle / idle path), so no locking needed.
-        static ATOM s_auxClass = 0;
-        if (!s_auxClass)
+        // This code path is only reached from the UI thread (audioMasterOpenWindow
+        // is called during effEditOpen or plugin idle, both on the UI thread),
+        // so no synchronisation is needed.
+        static bool s_auxClassRegistered = false;
+        if (!s_auxClassRegistered)
         {
             WNDCLASSEXW wc = {};
             wc.cbSize        = sizeof(wc);
@@ -808,9 +810,11 @@ VstIntPtr VSTPlugin2::audioMaster(
             wc.lpszClassName = L"KodiVSTAux";
             wc.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
             wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-            s_auxClass = RegisterClassExW(&wc);
-            if (!s_auxClass && GetLastError() == ERROR_CLASS_ALREADY_EXISTS)
-                s_auxClass = static_cast<ATOM>(1);  // already registered
+            // RegisterClassExW returns 0 and sets ERROR_CLASS_ALREADY_EXISTS if
+            // another instance already registered it; both outcomes are fine since
+            // we pass the class name string to CreateWindowExW, not the ATOM.
+            RegisterClassExW(&wc);
+            s_auxClassRegistered = true;
         }
 
         const int w = (vw->width  > 0) ? vw->width  : 640;
@@ -818,7 +822,7 @@ VstIntPtr VSTPlugin2::audioMaster(
 
         wchar_t wtitle[128] = L"VST Editor";
         if (vw->title[0] != '\0')
-            MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, 128);
+            MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, _countof(wtitle));
 
         RECT wr = {0, 0, w, h};
         AdjustWindowRectEx(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0);
