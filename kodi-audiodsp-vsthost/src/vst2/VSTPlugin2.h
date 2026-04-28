@@ -106,6 +106,10 @@ private:
     /// have C++ objects with destructors in the same scope (MSVC C4509).
     static VstIntPtr callEditOpenSafe(AEffect* effect, void* parentWindow);
 
+    /// Call effEditGetRect inside an SEH frame. Returns true if a rect pointer
+    /// was returned without throwing; false otherwise.
+    static bool callEditGetRectSafe(AEffect* effect, ERect** rectOut);
+
     /// Drain the parameter change ring buffer into the plugin (audio thread).
     void drainParamQueue();
 

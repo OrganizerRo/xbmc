@@ -10,6 +10,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <sstream>
 #include <algorithm>
 
@@ -223,6 +224,47 @@ std::string EditorBridge::processCommand(const std::string& json)
     std::string cmd  = JsonUtil::extractString(json, "cmd");
     std::string path = JsonUtil::extractString(json, "path");
 
+    auto findPluginByPath = [this](const std::string& pluginPath, DSPChain*& chainOut) -> IVSTPlugin*
+    {
+        chainOut = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_editorMutex);
+            chainOut = m_chain;
+        }
+        if (!chainOut)
+            return nullptr;
+        for (int i = 0; i < chainOut->getPluginCount(); ++i)
+        {
+            auto* p = chainOut->getPlugin(i);
+            if (p && p->getPath() == pluginPath)
+                return p;
+        }
+        return nullptr;
+    };
+
+    auto extractFloatField = [](const std::string& src, const std::string& key, float& outValue) -> bool
+    {
+        const std::string needle = "\"" + key + "\"";
+        size_t pos = src.find(needle);
+        if (pos == std::string::npos)
+            return false;
+        pos += needle.size();
+        pos = src.find(':', pos);
+        if (pos == std::string::npos)
+            return false;
+        ++pos;
+        while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t' || src[pos] == '\n' || src[pos] == '\r'))
+            ++pos;
+        if (pos >= src.size())
+            return false;
+        char* endPtr = nullptr;
+        const float value = std::strtof(src.c_str() + pos, &endPtr);
+        if (endPtr == src.c_str() + pos)
+            return false;
+        outValue = value;
+        return true;
+    };
+
     if (cmd == "ping")
     {
         return "{\"status\":\"ok\",\"cmd\":\"ping\"}";
@@ -234,26 +276,11 @@ std::string EditorBridge::processCommand(const std::string& json)
             return "{\"status\":\"error\",\"cmd\":\"open\",\"error\":\"Missing path\"}";
 
         DSPChain* chain = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(m_editorMutex);
-            chain = m_chain;
-        }
-
+        IVSTPlugin* plugin = findPluginByPath(path, chain);
         if (!chain)
             return "{\"status\":\"error\",\"cmd\":\"open\",\"path\":\""
                    + JsonUtil::escape(path)
                    + "\",\"error\":\"No active audio chain\"}";
-
-        // Find the plugin in the chain
-        IVSTPlugin* plugin = nullptr;
-        for (int i = 0; i < chain->getPluginCount(); ++i)
-        {
-            auto* p = chain->getPlugin(i);
-            if (p && p->getPath() == path) {
-                plugin = p;
-                break;
-            }
-        }
 
         if (!plugin)
             return "{\"status\":\"error\",\"cmd\":\"open\",\"path\":\""
@@ -310,6 +337,122 @@ std::string EditorBridge::processCommand(const std::string& json)
     {
         PostThreadMessageW(m_uiThreadID, WM_VSTBRIDGE_CLOSE, 0, 0);
         return "{\"status\":\"ok\",\"cmd\":\"close_all\"}";
+    }
+
+    if (cmd == "list_params")
+    {
+        if (path.empty())
+            return "{\"status\":\"error\",\"cmd\":\"list_params\",\"error\":\"Missing path\"}";
+
+        DSPChain* chain = nullptr;
+        IVSTPlugin* plugin = findPluginByPath(path, chain);
+        if (!chain)
+            return "{\"status\":\"error\",\"cmd\":\"list_params\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"No active audio chain\"}";
+        if (!plugin)
+            return "{\"status\":\"error\",\"cmd\":\"list_params\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"Plugin not in chain\"}";
+
+        std::string response = "{\"status\":\"ok\",\"cmd\":\"list_params\",\"path\":\""
+                             + JsonUtil::escape(path)
+                             + "\",\"params\":[";
+
+        const int count = std::max(0, plugin->getParameterCount());
+        for (int i = 0; i < count; ++i)
+        {
+            if (i > 0)
+                response += ",";
+            const std::string paramName = plugin->getParameterName(i);
+            const float paramValue = plugin->getParameter(i);
+            response += "{\"index\":" + std::to_string(i)
+                     + ",\"name\":\"" + JsonUtil::escape(paramName)
+                     + "\",\"value\":" + std::to_string(paramValue)
+                     + "}";
+        }
+        response += "]}";
+        return response;
+    }
+
+    if (cmd == "get_param")
+    {
+        if (path.empty())
+            return "{\"status\":\"error\",\"cmd\":\"get_param\",\"error\":\"Missing path\"}";
+
+        int index = 0;
+        if (!JsonUtil::extractInt(json, "index", index))
+            return "{\"status\":\"error\",\"cmd\":\"get_param\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"Missing index\"}";
+
+        DSPChain* chain = nullptr;
+        IVSTPlugin* plugin = findPluginByPath(path, chain);
+        if (!chain)
+            return "{\"status\":\"error\",\"cmd\":\"get_param\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"No active audio chain\"}";
+        if (!plugin)
+            return "{\"status\":\"error\",\"cmd\":\"get_param\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"Plugin not in chain\"}";
+
+        const int count = std::max(0, plugin->getParameterCount());
+        if (index < 0 || index >= count)
+            return "{\"status\":\"error\",\"cmd\":\"get_param\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"Invalid index\"}";
+
+        const std::string paramName = plugin->getParameterName(index);
+        const float paramValue = plugin->getParameter(index);
+        return "{\"status\":\"ok\",\"cmd\":\"get_param\",\"path\":\""
+               + JsonUtil::escape(path)
+               + "\",\"index\":" + std::to_string(index)
+               + ",\"name\":\"" + JsonUtil::escape(paramName)
+               + "\",\"value\":" + std::to_string(paramValue) + "}";
+    }
+
+    if (cmd == "set_param")
+    {
+        if (path.empty())
+            return "{\"status\":\"error\",\"cmd\":\"set_param\",\"error\":\"Missing path\"}";
+
+        int index = 0;
+        if (!JsonUtil::extractInt(json, "index", index))
+            return "{\"status\":\"error\",\"cmd\":\"set_param\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"Missing index\"}";
+
+        float value = 0.0f;
+        if (!extractFloatField(json, "value", value))
+            return "{\"status\":\"error\",\"cmd\":\"set_param\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"Missing value\"}";
+
+        DSPChain* chain = nullptr;
+        IVSTPlugin* plugin = findPluginByPath(path, chain);
+        if (!chain)
+            return "{\"status\":\"error\",\"cmd\":\"set_param\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"No active audio chain\"}";
+        if (!plugin)
+            return "{\"status\":\"error\",\"cmd\":\"set_param\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"Plugin not in chain\"}";
+
+        const int count = std::max(0, plugin->getParameterCount());
+        if (index < 0 || index >= count)
+            return "{\"status\":\"error\",\"cmd\":\"set_param\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"Invalid index\"}";
+
+        value = std::max(0.0f, std::min(1.0f, value));
+        plugin->setParameter(index, value);
+
+        return "{\"status\":\"ok\",\"cmd\":\"set_param\",\"path\":\""
+               + JsonUtil::escape(path)
+               + "\",\"index\":" + std::to_string(index)
+               + ",\"value\":" + std::to_string(value) + "}";
     }
 
     return "{\"status\":\"error\",\"error\":\"Unknown command\"}";

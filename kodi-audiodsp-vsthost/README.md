@@ -103,10 +103,10 @@ The addon uses `vstscanner.exe` to discover available plugins out-of-process. To
 
 ## Current limitations
 
-- **No runtime UI.** There is currently no in-Kodi interface for browsing, adding, removing, or reordering VST plugins. All configuration is done by editing the JSON files described above.
+- **Limited runtime UI.** The companion `plugin.audio.vstmanager` addon provides in-Kodi browsing plus add/remove actions and can open native VST editors when available.
 - **Changes require a stream restart.** If you edit `chain.json` while Kodi is playing, the changes won't take effect until the next audio stream starts (stop and restart playback, or restart Kodi).
 - **Windows only.** The addon currently builds and runs on Windows (`audiodsp.vsthost.dll`). Linux/macOS support would require platform-specific plugin loading in the VST2/VST3 implementations and the scanner.
-- **No plugin GUI.** VST plugin editor windows are not displayed. Parameters can only be set programmatically or via saved state.
+- **Plugin GUI depends on plugin compatibility.** Native editor windows are shown when the plugin exposes a usable VST editor; otherwise parameter fallback controls are used when available.
 
 ## License
 
