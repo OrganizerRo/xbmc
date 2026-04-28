@@ -98,20 +98,31 @@ jobs:
         shell: cmd
         run: |
           setlocal EnableExtensions EnableDelayedExpansion
+          set "DOWNLOAD_OK=0"
           for %%M in (%KODI_MIRRORS%) do (
-            set "KODI_MIRROR=%%M"
-            echo Trying KODI_MIRROR=!KODI_MIRROR!
-            for /L %%R in (1,1,!KODI_DOWNLOAD_RETRIES!) do (
-              echo Attempt %%R of !KODI_DOWNLOAD_RETRIES! on !KODI_MIRROR!
-              call tools\buildsteps\windows\download-dependencies.bat && goto :download_deps_ok
-              echo Download failed on !KODI_MIRROR! attempt %%R
-              if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t 15 /nobreak >nul
+            if !DOWNLOAD_OK! EQU 0 (
+              set "KODI_MIRROR=%%M"
+              echo Trying KODI_MIRROR=!KODI_MIRROR!
+              for /L %%R in (1,1,!KODI_DOWNLOAD_RETRIES!) do (
+                if !DOWNLOAD_OK! EQU 0 (
+                  echo Attempt %%R of !KODI_DOWNLOAD_RETRIES! on !KODI_MIRROR!
+                  call tools\buildsteps\windows\download-dependencies.bat
+                  if not errorlevel 1 (
+                    set "DOWNLOAD_OK=1"
+                  ) else (
+                    echo Download failed on !KODI_MIRROR! attempt %%R
+                    if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t 15 /nobreak >nul
+                  )
+                )
+              )
             )
           )
-          echo ERROR: Failed to download build dependencies from all configured Kodi mirrors.
-          exit /b 1
-          :download_deps_ok
-          echo Build dependencies downloaded successfully.
+          if !DOWNLOAD_OK! EQU 1 (
+            echo Build dependencies downloaded successfully.
+          ) else (
+            echo ERROR: Failed to download build dependencies from all configured Kodi mirrors.
+            exit /b 1
+          )
 
       # ---------------------------------------------------------------
       # MinGW build (cache miss only)
@@ -233,20 +244,31 @@ jobs:
         shell: cmd
         run: |
           setlocal EnableExtensions EnableDelayedExpansion
+          set "DOWNLOAD_OK=0"
           for %%M in (%KODI_MIRRORS%) do (
-            set "KODI_MIRROR=%%M"
-            echo Trying KODI_MIRROR=!KODI_MIRROR!
-            for /L %%R in (1,1,!KODI_DOWNLOAD_RETRIES!) do (
-              echo Attempt %%R of !KODI_DOWNLOAD_RETRIES! on !KODI_MIRROR!
-              call tools\buildsteps\windows\download-dependencies.bat && goto :download_deps_ok
-              echo Download failed on !KODI_MIRROR! attempt %%R
-              if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t 15 /nobreak >nul
+            if !DOWNLOAD_OK! EQU 0 (
+              set "KODI_MIRROR=%%M"
+              echo Trying KODI_MIRROR=!KODI_MIRROR!
+              for /L %%R in (1,1,!KODI_DOWNLOAD_RETRIES!) do (
+                if !DOWNLOAD_OK! EQU 0 (
+                  echo Attempt %%R of !KODI_DOWNLOAD_RETRIES! on !KODI_MIRROR!
+                  call tools\buildsteps\windows\download-dependencies.bat
+                  if not errorlevel 1 (
+                    set "DOWNLOAD_OK=1"
+                  ) else (
+                    echo Download failed on !KODI_MIRROR! attempt %%R
+                    if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t 15 /nobreak >nul
+                  )
+                )
+              )
             )
           )
-          echo ERROR: Failed to download build dependencies from all configured Kodi mirrors.
-          exit /b 1
-          :download_deps_ok
-          echo Build dependencies downloaded successfully.
+          if !DOWNLOAD_OK! EQU 1 (
+            echo Build dependencies downloaded successfully.
+          ) else (
+            echo ERROR: Failed to download build dependencies from all configured Kodi mirrors.
+            exit /b 1
+          )
 
       # Leia has CMakeLists.txt at repo root; use an out-of-source build dir.
       # -DENABLE_INTERNAL_FFMPEG=OFF forces CMake to use the externally-built
