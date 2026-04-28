@@ -21,8 +21,9 @@ jobs:
     runs-on: windows-2022
     env:
       WORKSPACE: ${{ github.workspace }}
-      KODI_MIRRORS: https://mirrors.kodi.tv/ http://mirrors.kodi.tv/ https://ftp.fau.de/xbmc/ http://ftp.fau.de/xbmc/
+      KODI_MIRRORS: https://mirrors.kodi.tv/ https://ftp.fau.de/xbmc/
       KODI_DOWNLOAD_RETRIES: 3
+      KODI_RETRY_DELAY_SECONDS: 15
 
     steps:
       - name: Checkout
@@ -111,7 +112,7 @@ jobs:
                     set "DOWNLOAD_OK=1"
                   ) else (
                     echo Download failed on !KODI_MIRROR! attempt %%R
-                    if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t 15 /nobreak >nul
+                    if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t !KODI_RETRY_DELAY_SECONDS! /nobreak >nul
                   )
                 )
               )
@@ -257,7 +258,7 @@ jobs:
                     set "DOWNLOAD_OK=1"
                   ) else (
                     echo Download failed on !KODI_MIRROR! attempt %%R
-                    if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t 15 /nobreak >nul
+                    if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t !KODI_RETRY_DELAY_SECONDS! /nobreak >nul
                   )
                 )
               )
