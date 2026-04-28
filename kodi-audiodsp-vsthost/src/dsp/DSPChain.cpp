@@ -85,8 +85,7 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
         loaded = plugin->isLoaded() ? 1 : 0;
         bypassed = plugin->isBypassed() ? 1 : 0;
         VSTLOG(VSTLOG_DEBUG,
-               "[DSPChain] addPlugin: chain[%d] path='%s' format=%s loaded=%d name='%s' vendor='%s' "
-               "hasEditor=%d params=%d latency=%d bypassed=%d",
+               "[DSPChain] addPlugin: chain[%d] path='%s' format=%s loaded=%d name='%s' vendor='%s' hasEditor=%d params=%d latency=%d bypassed=%d",
                chainIndex, addedSlot.path.c_str(), formatName, loaded,
                pluginName.c_str(), vendorName.c_str(), hasEditor, paramCount, latency, bypassed);
     }
