@@ -53,7 +53,56 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
     }
 
     m_plugins.push_back(std::move(slot));
-    VSTLOG(VSTLOG_DEBUG, "[DSPChain] addPlugin: added '%s'", path.c_str());
+    const int chainIndex = static_cast<int>(m_plugins.size()) - 1;
+    const ChainPlugin& addedSlot = m_plugins.back();
+    IVSTPlugin* plugin = addedSlot.plugin.get();
+
+    const char* formatName = "unknown";
+    if (addedSlot.format == IVSTPlugin::PluginFormat::VST2)
+        formatName = "vst2";
+    else if (addedSlot.format == IVSTPlugin::PluginFormat::VST3)
+        formatName = "vst3";
+
+    const char* pluginName = "<unloaded>";
+    const char* vendorName = "<unloaded>";
+    int hasEditor = 0;
+    int paramCount = 0;
+    int latency = 0;
+    int loaded = 0;
+    int bypassed = 0;
+
+    if (plugin)
+    {
+        const std::string nameStr = plugin->getName();
+        const std::string vendorStr = plugin->getVendorName();
+        pluginName = nameStr.empty() ? "<unnamed>" : nameStr.c_str();
+        vendorName = vendorStr.empty() ? "<unknown>" : vendorStr.c_str();
+        hasEditor = plugin->hasEditor() ? 1 : 0;
+        paramCount = plugin->getParameterCount();
+        latency = plugin->getLatencySamples();
+        loaded = plugin->isLoaded() ? 1 : 0;
+        bypassed = plugin->isBypassed() ? 1 : 0;
+        VSTLOG(VSTLOG_DEBUG,
+               "[DSPChain] addPlugin: chain[%d] path='%s' format=%s loaded=%d name='%s' vendor='%s' "
+               "hasEditor=%d params=%d latency=%d bypassed=%d",
+               chainIndex, addedSlot.path.c_str(), formatName, loaded,
+               pluginName, vendorName, hasEditor, paramCount, latency, bypassed);
+    }
+    else
+    {
+        VSTLOG(VSTLOG_DEBUG,
+               "[DSPChain] addPlugin: chain[%d] path='%s' format=%s (plugin object missing)",
+               chainIndex, addedSlot.path.c_str(), formatName);
+    }
+
+    std::ostringstream chainSummary;
+    chainSummary << "[DSPChain] addPlugin: chain order after insert";
+    for (size_t i = 0; i < m_plugins.size(); ++i)
+    {
+        const auto& chainSlot = m_plugins[i];
+        chainSummary << " [" << i << "]='" << chainSlot.path << "'";
+    }
+    VSTLOG(VSTLOG_DEBUG, "%s", chainSummary.str().c_str());
     return true;
 }
 
