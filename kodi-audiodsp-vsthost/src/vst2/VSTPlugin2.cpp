@@ -54,6 +54,24 @@ AEffect* VSTPlugin2::callPluginMainSafe(VSTENTRYPROC proc)
 }
 
 // ---------------------------------------------------------------------------
+// callEditOpenSafe — SEH wrapper for effEditOpen
+//
+// Same rationale as callPluginMainSafe: isolated to avoid MSVC C4509.
+// Returns the dispatcher result, or -1 on structured exception.
+// ---------------------------------------------------------------------------
+
+VstIntPtr VSTPlugin2::callEditOpenSafe(AEffect* effect, void* parentWindow)
+{
+    VstIntPtr result = -1;
+    __try {
+        result = effect->dispatcher(effect, effEditOpen, 0, 0, parentWindow, 0.0f);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        result = -1;
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // load()
 // ---------------------------------------------------------------------------
 
@@ -161,7 +179,15 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
     // --- 12. Allocate scratch buffers --------------------------------------------
     allocateScratchBuffers();
 
-    // --- 13. Mark as loaded and active ------------------------------------------
+    // --- 13. Initialise VstTimeInfo so audioMasterGetTime returns valid data ------
+    m_timeInfo = {};
+    m_timeInfo.sampleRate         = m_sampleRate;
+    m_timeInfo.tempo              = 120.0;
+    m_timeInfo.timeSigNumerator   = 4;
+    m_timeInfo.timeSigDenominator = 4;
+    m_timeInfo.flags              = kVstTempoValid | kVstTimeSigValid;
+
+    // --- 14. Mark as loaded and active ------------------------------------------
     m_loaded = true;
     m_active = true;
 
@@ -243,6 +269,9 @@ int VSTPlugin2::process(float** in, float** out, int samples)
 {
     // Apply queued parameter changes before touching audio
     drainParamQueue();
+
+    // Advance time position (used by audioMasterGetTime for plugin UIs)
+    m_timeInfo.samplePos += static_cast<double>(samples);
 
     // Bypass: pass input straight through
     if (!m_loaded || m_bypassed) {
@@ -455,7 +484,53 @@ bool VSTPlugin2::openEditor(void* parentWindow)
 {
     if (!m_loaded || !m_effect || !hasEditor())
         return false;
-    m_effect->dispatcher(m_effect, effEditOpen, 0, 0, parentWindow, 0.0f);
+
+    // Validate the parent window handle before passing it to the plugin.
+    // A null or already-destroyed HWND would cause the plugin to embed into
+    // an invalid window, producing no visible UI and potentially crashing.
+    if (!parentWindow)
+    {
+        VSTLOG(VSTLOG_ERROR,
+               "[VSTPlugin2] openEditor — null parent HWND for '%s'",
+               m_name.c_str());
+        return false;
+    }
+    if (!IsWindow(static_cast<HWND>(parentWindow)))
+    {
+        VSTLOG(VSTLOG_ERROR,
+               "[VSTPlugin2] openEditor — parent HWND (%p) is not a valid window for '%s'",
+               parentWindow, m_name.c_str());
+        return false;
+    }
+
+    VSTLOG(VSTLOG_DEBUG, "[VSTPlugin2] openEditor — calling effEditOpen for '%s'", m_name.c_str());
+
+    VstIntPtr result = callEditOpenSafe(m_effect, parentWindow);
+    if (result == -1)
+    {
+        VSTLOG(VSTLOG_ERROR,
+               "[VSTPlugin2] openEditor — effEditOpen threw a structured exception in '%s'",
+               m_name.c_str());
+        return false;
+    }
+
+    VSTLOG(VSTLOG_DEBUG, "[VSTPlugin2] openEditor — effEditOpen returned %lld for '%s'",
+           static_cast<long long>(result), m_name.c_str());
+
+    // VST2 plugins embed their UI by calling SetParent() inside effEditOpen;
+    // the host never receives a child HWND back from the dispatcher.
+    // Probe for a child window to confirm the plugin actually attached its UI.
+    HWND child = GetWindow(static_cast<HWND>(parentWindow), GW_CHILD);
+    if (!child)
+    {
+        VSTLOG(VSTLOG_WARN,
+               "[VSTPlugin2] openEditor — effEditOpen returned %lld but no child window appeared "
+               "in host HWND for '%s'; the editor UI may be blank",
+               static_cast<long long>(result), m_name.c_str());
+    }
+
+    // Store the host HWND so audioMasterSizeWindow can forward resize requests
+    m_editorHwnd = static_cast<HWND>(parentWindow);
     return true;
 }
 
@@ -463,6 +538,7 @@ void VSTPlugin2::closeEditor()
 {
     if (m_loaded && m_effect)
         m_effect->dispatcher(m_effect, effEditClose, 0, 0, nullptr, 0.0f);
+    m_editorHwnd = nullptr;
 }
 
 bool VSTPlugin2::getEditorSize(int& width, int& height) const
@@ -517,8 +593,8 @@ VstIntPtr VSTCALLBACK VSTPlugin2::staticAudioMaster(
 VstIntPtr VSTPlugin2::audioMaster(
     AEffect*  /*effect*/,
     VstInt32  opcode,
-    VstInt32  /*index*/,
-    VstIntPtr /*value*/,
+    VstInt32  index,
+    VstIntPtr value,
     void*     ptr,
     float     /*opt*/)
 {
@@ -526,6 +602,31 @@ VstIntPtr VSTPlugin2::audioMaster(
     {
     case audioMasterVersion:
         return 2400;
+
+    case audioMasterIdle:
+        // Plugin requests idle time — nothing to do in a realtime host.
+        return 0;
+
+    case audioMasterGetTime:
+        // Return a pointer to our VstTimeInfo struct.  The plugin must not
+        // free or cache this pointer across calls; it is always valid for the
+        // lifetime of the plugin instance.
+        return reinterpret_cast<VstIntPtr>(&m_timeInfo);
+
+    case audioMasterSizeWindow:
+        // Plugin requests the host to resize its editor window.
+        // index = new width, value = new height.
+        // Forward to the UI thread via PostMessage (WM_USER+103 = WM_VSTBRIDGE_RESIZE
+        // as defined in EditorBridge.h).  This is fire-and-forget; the UI thread
+        // will call SetWindowPos when it processes the message.
+        if (m_editorHwnd && index > 0 && value > 0)
+        {
+            PostMessage(m_editorHwnd,
+                        WM_USER + 103,
+                        static_cast<WPARAM>(index),
+                        static_cast<LPARAM>(value));
+        }
+        return 1;
 
     case audioMasterGetSampleRate:
         return static_cast<VstIntPtr>(m_sampleRate);
@@ -550,10 +651,14 @@ VstIntPtr VSTPlugin2::audioMaster(
         return 1000;
 
     case audioMasterCanDo:
-        // We do not support MIDI, time info, or any other optional features
+        // We do not support MIDI, automation, or other optional host features
         return 0;
 
     default:
+        VSTLOG(VSTLOG_DEBUG,
+               "[VSTPlugin2] audioMaster — unhandled opcode %d (index=%d, value=%lld) in '%s'",
+               static_cast<int>(opcode), static_cast<int>(index),
+               static_cast<long long>(value), m_name.c_str());
         return 0;
     }
 }
