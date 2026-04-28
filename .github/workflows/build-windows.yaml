@@ -97,39 +97,7 @@ jobs:
       # find zlib via -I/depends/win32/include -LIBPATH:/depends/win32/lib.
       - name: Download build dependencies (pre-FFmpeg)
         shell: cmd
-        run: |
-          setlocal EnableExtensions EnableDelayedExpansion
-          if not defined KODI_MIRRORS set "KODI_MIRRORS=https://mirrors.kodi.tv/"
-          if not defined KODI_DOWNLOAD_RETRIES set "KODI_DOWNLOAD_RETRIES=3"
-          if not defined KODI_RETRY_DELAY_SECONDS set "KODI_RETRY_DELAY_SECONDS=15"
-          set "MIRRORS=%KODI_MIRRORS%"
-          set "RETRIES=%KODI_DOWNLOAD_RETRIES%"
-          set "RETRY_DELAY=%KODI_RETRY_DELAY_SECONDS%"
-          set "DOWNLOAD_OK=0"
-          for %%M in (%MIRRORS%) do (
-            if !DOWNLOAD_OK! EQU 0 (
-              set "KODI_MIRROR=%%M"
-              echo Trying KODI_MIRROR=!KODI_MIRROR!
-              for /L %%R in (1,1,!RETRIES!) do (
-                if !DOWNLOAD_OK! EQU 0 (
-                  echo Attempt %%R of !RETRIES! on !KODI_MIRROR!
-                  call tools\buildsteps\windows\download-dependencies.bat
-                  if not errorlevel 1 (
-                    set "DOWNLOAD_OK=1"
-                  ) else (
-                    echo Download failed on !KODI_MIRROR! attempt %%R
-                    if not %%R==!RETRIES! timeout /t !RETRY_DELAY! /nobreak >nul
-                  )
-                )
-              )
-            )
-          )
-          if !DOWNLOAD_OK! EQU 1 (
-            echo Build dependencies downloaded successfully.
-          ) else (
-            echo ERROR: Failed to download build dependencies from all configured Kodi mirrors.
-            exit /b 1
-          )
+        run: call tools\buildsteps\windows\download-dependencies-with-retry.bat
 
       # ---------------------------------------------------------------
       # MinGW build (cache miss only)
@@ -249,39 +217,7 @@ jobs:
       # existing files so this is a no-op / safety net).
       - name: Download build dependencies
         shell: cmd
-        run: |
-          setlocal EnableExtensions EnableDelayedExpansion
-          if not defined KODI_MIRRORS set "KODI_MIRRORS=https://mirrors.kodi.tv/"
-          if not defined KODI_DOWNLOAD_RETRIES set "KODI_DOWNLOAD_RETRIES=3"
-          if not defined KODI_RETRY_DELAY_SECONDS set "KODI_RETRY_DELAY_SECONDS=15"
-          set "MIRRORS=%KODI_MIRRORS%"
-          set "RETRIES=%KODI_DOWNLOAD_RETRIES%"
-          set "RETRY_DELAY=%KODI_RETRY_DELAY_SECONDS%"
-          set "DOWNLOAD_OK=0"
-          for %%M in (%MIRRORS%) do (
-            if !DOWNLOAD_OK! EQU 0 (
-              set "KODI_MIRROR=%%M"
-              echo Trying KODI_MIRROR=!KODI_MIRROR!
-              for /L %%R in (1,1,!RETRIES!) do (
-                if !DOWNLOAD_OK! EQU 0 (
-                  echo Attempt %%R of !RETRIES! on !KODI_MIRROR!
-                  call tools\buildsteps\windows\download-dependencies.bat
-                  if not errorlevel 1 (
-                    set "DOWNLOAD_OK=1"
-                  ) else (
-                    echo Download failed on !KODI_MIRROR! attempt %%R
-                    if not %%R==!RETRIES! timeout /t !RETRY_DELAY! /nobreak >nul
-                  )
-                )
-              )
-            )
-          )
-          if !DOWNLOAD_OK! EQU 1 (
-            echo Build dependencies downloaded successfully.
-          ) else (
-            echo ERROR: Failed to download build dependencies from all configured Kodi mirrors.
-            exit /b 1
-          )
+        run: call tools\buildsteps\windows\download-dependencies-with-retry.bat
 
       # Leia has CMakeLists.txt at repo root; use an out-of-source build dir.
       # -DENABLE_INTERNAL_FFMPEG=OFF forces CMake to use the externally-built
