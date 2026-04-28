@@ -99,20 +99,26 @@ jobs:
         shell: cmd
         run: |
           setlocal EnableExtensions EnableDelayedExpansion
+          if not defined KODI_MIRRORS set "KODI_MIRRORS=https://mirrors.kodi.tv/"
+          if not defined KODI_DOWNLOAD_RETRIES set "KODI_DOWNLOAD_RETRIES=3"
+          if not defined KODI_RETRY_DELAY_SECONDS set "KODI_RETRY_DELAY_SECONDS=15"
+          set "MIRRORS=%KODI_MIRRORS%"
+          set "RETRIES=%KODI_DOWNLOAD_RETRIES%"
+          set "RETRY_DELAY=%KODI_RETRY_DELAY_SECONDS%"
           set "DOWNLOAD_OK=0"
-          for %%M in (%KODI_MIRRORS%) do (
+          for %%M in (%MIRRORS%) do (
             if !DOWNLOAD_OK! EQU 0 (
               set "KODI_MIRROR=%%M"
               echo Trying KODI_MIRROR=!KODI_MIRROR!
-              for /L %%R in (1,1,!KODI_DOWNLOAD_RETRIES!) do (
+              for /L %%R in (1,1,!RETRIES!) do (
                 if !DOWNLOAD_OK! EQU 0 (
-                  echo Attempt %%R of !KODI_DOWNLOAD_RETRIES! on !KODI_MIRROR!
+                  echo Attempt %%R of !RETRIES! on !KODI_MIRROR!
                   call tools\buildsteps\windows\download-dependencies.bat
                   if not errorlevel 1 (
                     set "DOWNLOAD_OK=1"
                   ) else (
                     echo Download failed on !KODI_MIRROR! attempt %%R
-                    if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t !KODI_RETRY_DELAY_SECONDS! /nobreak >nul
+                    if not %%R==!RETRIES! timeout /t !RETRY_DELAY! /nobreak >nul
                   )
                 )
               )
@@ -245,20 +251,26 @@ jobs:
         shell: cmd
         run: |
           setlocal EnableExtensions EnableDelayedExpansion
+          if not defined KODI_MIRRORS set "KODI_MIRRORS=https://mirrors.kodi.tv/"
+          if not defined KODI_DOWNLOAD_RETRIES set "KODI_DOWNLOAD_RETRIES=3"
+          if not defined KODI_RETRY_DELAY_SECONDS set "KODI_RETRY_DELAY_SECONDS=15"
+          set "MIRRORS=%KODI_MIRRORS%"
+          set "RETRIES=%KODI_DOWNLOAD_RETRIES%"
+          set "RETRY_DELAY=%KODI_RETRY_DELAY_SECONDS%"
           set "DOWNLOAD_OK=0"
-          for %%M in (%KODI_MIRRORS%) do (
+          for %%M in (%MIRRORS%) do (
             if !DOWNLOAD_OK! EQU 0 (
               set "KODI_MIRROR=%%M"
               echo Trying KODI_MIRROR=!KODI_MIRROR!
-              for /L %%R in (1,1,!KODI_DOWNLOAD_RETRIES!) do (
+              for /L %%R in (1,1,!RETRIES!) do (
                 if !DOWNLOAD_OK! EQU 0 (
-                  echo Attempt %%R of !KODI_DOWNLOAD_RETRIES! on !KODI_MIRROR!
+                  echo Attempt %%R of !RETRIES! on !KODI_MIRROR!
                   call tools\buildsteps\windows\download-dependencies.bat
                   if not errorlevel 1 (
                     set "DOWNLOAD_OK=1"
                   ) else (
                     echo Download failed on !KODI_MIRROR! attempt %%R
-                    if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t !KODI_RETRY_DELAY_SECONDS! /nobreak >nul
+                    if not %%R==!RETRIES! timeout /t !RETRY_DELAY! /nobreak >nul
                   )
                 )
               )
