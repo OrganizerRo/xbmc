@@ -271,7 +271,7 @@ def _show_parameter_fallback(name, path):
         entries = []
         for p in params:
             idx = int(p.get('index', 0))
-            pname = p.get('name') or ('Param %d' % idx)
+            pname = p.get('name') or 'Param %d' % idx
             try:
                 pval = float(p.get('value', 0.0))
             except Exception:
@@ -285,7 +285,7 @@ def _show_parameter_fallback(name, path):
 
         param = params[choice]
         idx = int(param.get('index', 0))
-        pname = param.get('name') or ('Param %d' % idx)
+        pname = param.get('name') or 'Param %d' % idx
         try:
             current = float(param.get('value', 0.0))
         except Exception:

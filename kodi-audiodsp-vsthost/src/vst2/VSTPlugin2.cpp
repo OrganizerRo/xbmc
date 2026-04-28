@@ -75,8 +75,8 @@ bool VSTPlugin2::callEditGetRectSafe(AEffect* effect, ERect** rectOut)
 {
     if (!effect || !rectOut)
         return false;
+    *rectOut = nullptr;
     __try {
-        *rectOut = nullptr;
         effect->dispatcher(effect, effEditGetRect, 0, 0, rectOut, 0.0f);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         *rectOut = nullptr;
@@ -567,8 +567,6 @@ bool VSTPlugin2::getEditorSize(int& width, int& height) const
 
     ERect* rect = nullptr;
     if (!callEditGetRectSafe(m_effect, &rect))
-        return false;
-    if (!rect)
         return false;
 
     width  = static_cast<int>(rect->right  - rect->left);
