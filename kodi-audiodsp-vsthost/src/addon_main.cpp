@@ -67,12 +67,14 @@ extern "C" void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts)
 
 extern "C" __declspec(dllexport) const char* ADDON_GetTypeVersion(int type)
 {
+    // Legacy ADSP DLL exports a single ADSP API surface, so type is ignored.
     (void)type;
     return KODI_AE_DSP_API_VERSION;
 }
 
 extern "C" __declspec(dllexport) const char* ADDON_GetTypeMinVersion(int type)
 {
+    // Legacy ADSP DLL exports a single ADSP API surface, so type is ignored.
     (void)type;
     return KODI_AE_DSP_MIN_API_VERSION;
 }
