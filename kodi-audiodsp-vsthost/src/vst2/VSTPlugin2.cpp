@@ -224,10 +224,7 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
     const bool isSynth = (m_effect->flags & effFlagsIsSynth) != 0;
 
     VSTLOG(VSTLOG_INFO,
-           "[VSTPlugin2] Loaded '%s' — vendor='%s', vstApi=%lld, pluginVersion=%d, vendorVersion=%lld, "
-           "uniqueId=0x%08X, flags=0x%08X, hasEditor=%d, replacing=%d, doubleReplacing=%d, "
-           "programChunks=%d, isSynth=%d, params=%d, programs=%d, in=%d, out=%d, latency=%d, "
-           "canDo(receiveVstEvents=%lld sendVstEvents=%lld receiveVstMidiEvent=%lld sendVstMidiEvent=%lld)",
+           "[VSTPlugin2] Loaded '%s' — vendor='%s', vstApi=%lld, pluginVersion=%d, vendorVersion=%lld, uniqueId=0x%08X, flags=0x%08X, hasEditor=%d, replacing=%d, doubleReplacing=%d, programChunks=%d, isSynth=%d, params=%d, programs=%d, in=%d, out=%d, latency=%d, canDo(receiveVstEvents=%lld sendVstEvents=%lld receiveVstMidiEvent=%lld sendVstMidiEvent=%lld)",
            m_name.c_str(), m_vendor.c_str(),
            static_cast<long long>(vstApiVersion),
            m_effect->version,

@@ -96,9 +96,6 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
                chainIndex, addedSlot.path.c_str(), formatName);
     }
 
-    VSTLOG(VSTLOG_DEBUG,
-           "[DSPChain] addPlugin: chain now contains %d plugin(s)",
-           static_cast<int>(m_plugins.size()));
     return true;
 }
 
