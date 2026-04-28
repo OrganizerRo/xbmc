@@ -631,7 +631,7 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
         0,
         L"KodiVSTEditor",
         wtitle.c_str(),
-        WS_OVERLAPPEDWINDOW,
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         CW_USEDEFAULT, CW_USEDEFAULT,
         windowW, windowH,
         nullptr,        // no parent
@@ -657,25 +657,37 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
         return;
     }
 
-    // Open the VST editor inside our window
-    if (!plugin->openEditor(static_cast<void*>(hwnd)))
+    // Create a dedicated child container HWND for legacy VST1/VST2 editor paths.
+    HWND editorHost = CreateWindowExW(
+        0,
+        L"STATIC",
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        0,
+        0,
+        editorW,
+        editorH,
+        hwnd,
+        nullptr,
+        GetModuleHandleW(nullptr),
+        nullptr);
+
+    if (!editorHost)
+    {
+        VSTLOG(VSTLOG_ERROR,
+               "EditorBridge::doOpenEditor — failed to create child editor host for '%s': error %lu",
+               pluginPath.c_str(), GetLastError());
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    // Open the VST editor inside the dedicated child host window.
+    if (!plugin->openEditor(static_cast<void*>(editorHost)))
     {
         VSTLOG(VSTLOG_ERROR, "EditorBridge::doOpenEditor — plugin->openEditor() failed for '%s'",
                pluginPath.c_str());
         DestroyWindow(hwnd);
         return;
-    }
-
-    // Verify the plugin actually embedded a child window.
-    // VST2 plugins embed by calling SetParent() internally; check that a child
-    // appeared so silent blank-UI failures are diagnosable in the log.
-    HWND child = GetWindow(hwnd, GW_CHILD);
-    if (!child)
-    {
-        VSTLOG(VSTLOG_WARN,
-               "EditorBridge::doOpenEditor — effEditOpen succeeded but no child window appeared "
-               "in host HWND for '%s'; the editor UI may be blank",
-               pluginPath.c_str());
     }
 
     // Resize window to match the attached view's reported size.
@@ -853,6 +865,22 @@ LRESULT EditorBridge::handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         }
 
         DestroyWindow(hwnd);
+        return 0;
+    }
+
+    case WM_SIZE:
+    {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        for (HWND child = GetWindow(hwnd, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+        {
+            MoveWindow(child,
+                       0,
+                       0,
+                       client.right - client.left,
+                       client.bottom - client.top,
+                       TRUE);
+        }
         return 0;
     }
 

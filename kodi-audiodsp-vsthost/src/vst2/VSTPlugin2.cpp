@@ -19,6 +19,23 @@
 #include <cstring>
 #include <filesystem>
 
+namespace
+{
+std::wstring ToWideACP(const char* text)
+{
+    if (!text || text[0] == '\0')
+        return std::wstring();
+
+    int wlen = MultiByteToWideChar(CP_ACP, 0, text, -1, nullptr, 0);
+    if (wlen <= 0)
+        return std::wstring();
+
+    std::wstring wide(static_cast<size_t>(wlen), L'\0');
+    MultiByteToWideChar(CP_ACP, 0, text, -1, wide.data(), wlen);
+    return wide;
+}
+}
+
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
 // ---------------------------------------------------------------------------
@@ -190,6 +207,16 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
         m_vendor = vendorBuf;
     }
 
+    try
+    {
+        auto parent = std::filesystem::path(m_path).parent_path();
+        m_pluginDirectory = parent.empty() ? m_path : parent.string();
+    }
+    catch (...)
+    {
+        m_pluginDirectory = m_path;
+    }
+
     // --- 12. Allocate scratch buffers --------------------------------------------
     allocateScratchBuffers();
 
@@ -220,6 +247,8 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
 void VSTPlugin2::unload()
 {
     if (m_effect) {
+        if (m_editorContainerHwnd || m_editorHwnd || !m_secondaryEditorWindows.empty())
+            closeEditor();
         if (m_active) {
             m_effect->dispatcher(m_effect, effMainsChanged, 0, 0, nullptr, 0.0f);
             m_active = false;
@@ -524,12 +553,30 @@ bool VSTPlugin2::openEditor(void* parentWindow)
 
     VSTLOG(VSTLOG_DEBUG, "[VSTPlugin2] openEditor — calling effEditOpen for '%s'", m_name.c_str());
 
+    m_editorContainerHwnd = static_cast<HWND>(parentWindow);
+    HWND editorFrame = GetParent(m_editorContainerHwnd);
+    m_editorHwnd = editorFrame ? editorFrame : m_editorContainerHwnd;
+    m_needsLegacyIdle = false;
+    m_usedOpenWindowDuringEditOpen = false;
+    m_inEffEditOpen = true;
+
     VstIntPtr result = callEditOpenSafe(m_effect, parentWindow);
+    m_inEffEditOpen = false;
     if (result == -1)
     {
         VSTLOG(VSTLOG_ERROR,
                "[VSTPlugin2] openEditor — effEditOpen threw a structured exception in '%s'",
                m_name.c_str());
+        for (HWND hwnd : m_secondaryEditorWindows)
+        {
+            if (hwnd && IsWindow(hwnd))
+                DestroyWindow(hwnd);
+        }
+        m_secondaryEditorWindows.clear();
+        m_needsLegacyIdle = false;
+        m_usedOpenWindowDuringEditOpen = false;
+        m_editorContainerHwnd = nullptr;
+        m_editorHwnd = nullptr;
         return false;
     }
 
@@ -539,17 +586,15 @@ bool VSTPlugin2::openEditor(void* parentWindow)
     // VST2 plugins embed their UI by calling SetParent() inside effEditOpen;
     // the host never receives a child HWND back from the dispatcher.
     // Probe for a child window to confirm the plugin actually attached its UI.
-    HWND child = GetWindow(static_cast<HWND>(parentWindow), GW_CHILD);
-    if (!child)
+    HWND child = GetWindow(m_editorContainerHwnd, GW_CHILD);
+    if (!child && !m_usedOpenWindowDuringEditOpen)
     {
         VSTLOG(VSTLOG_WARN,
                "[VSTPlugin2] openEditor — effEditOpen returned %lld but no child window appeared "
-               "in host HWND for '%s'; the editor UI may be blank",
+               "in host container HWND for '%s'; the editor UI may be blank",
                static_cast<long long>(result), m_name.c_str());
     }
 
-    // Store the host HWND so audioMasterSizeWindow can forward resize requests
-    m_editorHwnd = static_cast<HWND>(parentWindow);
     return true;
 }
 
@@ -557,7 +602,19 @@ void VSTPlugin2::closeEditor()
 {
     if (m_loaded && m_effect)
         m_effect->dispatcher(m_effect, effEditClose, 0, 0, nullptr, 0.0f);
+
+    for (HWND hwnd : m_secondaryEditorWindows)
+    {
+        if (hwnd && IsWindow(hwnd))
+            DestroyWindow(hwnd);
+    }
+    m_secondaryEditorWindows.clear();
+
     m_editorHwnd = nullptr;
+    m_editorContainerHwnd = nullptr;
+    m_needsLegacyIdle = false;
+    m_inEffEditOpen = false;
+    m_usedOpenWindowDuringEditOpen = false;
 }
 
 bool VSTPlugin2::getEditorSize(int& width, int& height) const
@@ -577,7 +634,11 @@ bool VSTPlugin2::getEditorSize(int& width, int& height) const
 void VSTPlugin2::idleEditor()
 {
     if (m_loaded && m_effect)
+    {
         m_effect->dispatcher(m_effect, effEditIdle, 0, 0, nullptr, 0.0f);
+        if (m_needsLegacyIdle)
+            m_effect->dispatcher(m_effect, effIdle, 0, 0, nullptr, 0.0f);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -625,6 +686,10 @@ VstIntPtr VSTPlugin2::audioMaster(
         // Plugin requests idle time — nothing to do in a realtime host.
         return 0;
 
+    case audioMasterNeedIdle:
+        m_needsLegacyIdle = true;
+        return 1;
+
     case audioMasterGetTime:
         // Return a pointer to our VstTimeInfo struct.  The plugin must not
         // free or cache this pointer across calls; it is always valid for the
@@ -667,6 +732,90 @@ VstIntPtr VSTPlugin2::audioMaster(
 
     case audioMasterGetVendorVersion:
         return 1000;
+
+    case audioMasterGetLanguage:
+        return kVstLangEnglish;
+
+    case audioMasterOpenWindow:
+    {
+        auto* window = static_cast<VstWindow*>(ptr);
+        if (!window)
+            return 0;
+
+        if (m_inEffEditOpen && m_editorContainerHwnd && IsWindow(m_editorContainerHwnd))
+        {
+            m_usedOpenWindowDuringEditOpen = true;
+            window->winHandle = m_editorContainerHwnd;
+            return reinterpret_cast<VstIntPtr>(m_editorContainerHwnd);
+        }
+
+        const int clientW = window->width > 0 ? static_cast<int>(window->width) : 640;
+        const int clientH = window->height > 0 ? static_cast<int>(window->height) : 480;
+        RECT wr = {0, 0, static_cast<LONG>(clientW), static_cast<LONG>(clientH)};
+        AdjustWindowRectEx(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0);
+
+        std::wstring title = ToWideACP(window->title);
+        if (title.empty())
+            title = L"VST Window";
+
+        HWND hwnd = CreateWindowExW(
+            0,
+            L"KodiVSTEditor",
+            title.c_str(),
+            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+            window->xPos,
+            window->yPos,
+            wr.right - wr.left,
+            wr.bottom - wr.top,
+            m_editorHwnd,
+            nullptr,
+            GetModuleHandleW(nullptr),
+            nullptr);
+
+        if (!hwnd)
+        {
+            VSTLOG(VSTLOG_WARN,
+                   "[VSTPlugin2] audioMasterOpenWindow — CreateWindowExW failed for '%s': error %lu",
+                   m_name.c_str(), GetLastError());
+            return 0;
+        }
+
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
+
+        m_secondaryEditorWindows.push_back(hwnd);
+        window->winHandle = hwnd;
+        return reinterpret_cast<VstIntPtr>(hwnd);
+    }
+
+    case audioMasterCloseWindow:
+    {
+        auto* window = static_cast<VstWindow*>(ptr);
+        if (!window || !window->winHandle)
+            return 0;
+
+        HWND hwnd = static_cast<HWND>(window->winHandle);
+        window->winHandle = nullptr;
+
+        if (hwnd == m_editorContainerHwnd || hwnd == m_editorHwnd)
+            return 1;
+
+        auto it = std::remove(m_secondaryEditorWindows.begin(), m_secondaryEditorWindows.end(), hwnd);
+        if (it != m_secondaryEditorWindows.end())
+        {
+            m_secondaryEditorWindows.erase(it, m_secondaryEditorWindows.end());
+            if (IsWindow(hwnd))
+                DestroyWindow(hwnd);
+            return 1;
+        }
+        return 0;
+    }
+
+    case audioMasterGetDirectory:
+        return reinterpret_cast<VstIntPtr>(m_pluginDirectory.c_str());
+
+    case audioMasterUpdateDisplay:
+        return 1;
 
     case audioMasterCanDo:
     {

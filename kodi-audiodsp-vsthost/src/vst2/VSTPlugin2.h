@@ -140,9 +140,20 @@ private:
     // samplePos is incremented each process() call; other fields set in load().
     VstTimeInfo m_timeInfo{};
 
-    // HWND of the host window that was passed to openEditor(); used to forward
-    // audioMasterSizeWindow resize requests back to EditorBridge via PostMessage.
+    // HWND of the outer editor frame window; used to forward audioMasterSizeWindow
+    // resize requests back to EditorBridge via PostMessage.
     HWND m_editorHwnd = nullptr;
+
+    // Dedicated child container HWND passed to effEditOpen / returned from the
+    // legacy audioMasterOpenWindow primary-editor path.
+    HWND m_editorContainerHwnd = nullptr;
+
+    bool m_needsLegacyIdle = false;
+    bool m_inEffEditOpen = false;
+    bool m_usedOpenWindowDuringEditOpen = false;
+
+    std::string m_pluginDirectory;
+    std::vector<HWND> m_secondaryEditorWindows;
 
     // Scratch buffers — allocated once in load(), reused every process() call
     std::vector<std::vector<float>> m_inputBufs;

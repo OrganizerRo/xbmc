@@ -117,7 +117,7 @@ enum {
     audioMasterProcessEvents          =  8,  // ptr = VstEvents* to send to host
     // 9-12 = deprecated
     audioMasterIOChanged              = 13,  // plugin changed numInputs/numOutputs/latency
-    // 14 = deprecated
+    audioMasterNeedIdle               = 14,  // legacy UI requests effIdle/effEditIdle pumping
     audioMasterSizeWindow             = 15,  // index=width, value=height — resize editor
     audioMasterGetSampleRate          = 16,  // returns current sample rate
     audioMasterGetBlockSize           = 17,  // returns current block size
@@ -130,7 +130,9 @@ enum {
     // 35-36 = reserved
     audioMasterCanDo                  = 37,  // ptr = feature string; returns 1/-1/0
     audioMasterGetLanguage            = 38,  // returns VstHostLanguage enum value
-    // 39-41 = reserved
+    audioMasterOpenWindow             = 39,  // ptr = VstWindow* — host creates/returns a window handle
+    audioMasterCloseWindow            = 40,  // ptr = VstWindow* — host destroys a window it created
+    audioMasterGetDirectory           = 41,  // returns const char* plugin directory
     audioMasterUpdateDisplay          = 42,  // plugin requests host to refresh parameter display
     audioMasterBeginEdit              = 43,  // index = param — user began touching knob
     audioMasterEndEdit                = 44,  // index = param — user released knob
@@ -326,6 +328,24 @@ struct ERect {
     short left;
     short bottom;
     short right;
+};
+
+// ---------------------------------------------------------------------------
+// VstWindow — legacy host-managed editor/auxiliary window descriptor
+// Used by audioMasterOpenWindow/audioMasterCloseWindow on older VST1/VST2 UIs.
+// ---------------------------------------------------------------------------
+
+struct VstWindow {
+    char   title[128];
+    short  xPos;
+    short  yPos;
+    short  width;
+    short  height;
+    int    style;
+    void*  parent;
+    void*  userHandle;
+    void*  winHandle;
+    char   future[104];
 };
 
 // ---------------------------------------------------------------------------
