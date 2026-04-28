@@ -510,6 +510,26 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
     VSTLOG(VSTLOG_INFO, "EditorBridge::doOpenEditor — editor window opened for '%s'",
            pluginPath.c_str());
 
+    // Center the window on the monitor it was placed on (work area, multi-monitor safe)
+    {
+        RECT finalRect;
+        GetWindowRect(hwnd, &finalRect);
+        int finalW = finalRect.right  - finalRect.left;
+        int finalH = finalRect.bottom - finalRect.top;
+
+        HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfo(hmon, &mi))
+        {
+            int monW = mi.rcWork.right  - mi.rcWork.left;
+            int monH = mi.rcWork.bottom - mi.rcWork.top;
+            int posX = mi.rcWork.left + (monW - finalW) / 2;
+            int posY = mi.rcWork.top  + (monH - finalH) / 2;
+            SetWindowPos(hwnd, nullptr, posX, posY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+        }
+    }
+
     // Show the window
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
