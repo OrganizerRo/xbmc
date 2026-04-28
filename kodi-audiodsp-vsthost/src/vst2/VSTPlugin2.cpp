@@ -21,6 +21,10 @@
 
 namespace
 {
+constexpr int kDefaultLegacyWindowWidth = 640;
+constexpr int kDefaultLegacyWindowHeight = 480;
+constexpr wchar_t kDefaultLegacyWindowTitle[] = L"VST Window";
+
 std::wstring ToWideACP(const char* text)
 {
     if (!text || text[0] == '\0')
@@ -30,9 +34,9 @@ std::wstring ToWideACP(const char* text)
     if (wlen <= 0)
         return std::wstring();
 
-    std::wstring wide(static_cast<size_t>(wlen), L'\0');
-    MultiByteToWideChar(CP_ACP, 0, text, -1, wide.data(), wlen);
-    return wide;
+    std::vector<wchar_t> buffer(static_cast<size_t>(wlen), L'\0');
+    MultiByteToWideChar(CP_ACP, 0, text, -1, buffer.data(), wlen);
+    return std::wstring(buffer.data());
 }
 }
 
@@ -567,10 +571,10 @@ bool VSTPlugin2::openEditor(void* parentWindow)
         VSTLOG(VSTLOG_ERROR,
                "[VSTPlugin2] openEditor — effEditOpen threw a structured exception in '%s'",
                m_name.c_str());
-        for (HWND hwnd : m_secondaryEditorWindows)
+        for (HWND secondaryHwnd : m_secondaryEditorWindows)
         {
-            if (hwnd && IsWindow(hwnd))
-                DestroyWindow(hwnd);
+            if (secondaryHwnd && IsWindow(secondaryHwnd))
+                DestroyWindow(secondaryHwnd);
         }
         m_secondaryEditorWindows.clear();
         m_needsLegacyIdle = false;
@@ -603,10 +607,10 @@ void VSTPlugin2::closeEditor()
     if (m_loaded && m_effect)
         m_effect->dispatcher(m_effect, effEditClose, 0, 0, nullptr, 0.0f);
 
-    for (HWND hwnd : m_secondaryEditorWindows)
+    for (HWND secondaryHwnd : m_secondaryEditorWindows)
     {
-        if (hwnd && IsWindow(hwnd))
-            DestroyWindow(hwnd);
+        if (secondaryHwnd && IsWindow(secondaryHwnd))
+            DestroyWindow(secondaryHwnd);
     }
     m_secondaryEditorWindows.clear();
 
@@ -749,14 +753,16 @@ VstIntPtr VSTPlugin2::audioMaster(
             return reinterpret_cast<VstIntPtr>(m_editorContainerHwnd);
         }
 
-        const int clientW = window->width > 0 ? static_cast<int>(window->width) : 640;
-        const int clientH = window->height > 0 ? static_cast<int>(window->height) : 480;
+        const int clientW =
+            window->width > 0 ? static_cast<int>(window->width) : kDefaultLegacyWindowWidth;
+        const int clientH =
+            window->height > 0 ? static_cast<int>(window->height) : kDefaultLegacyWindowHeight;
         RECT wr = {0, 0, static_cast<LONG>(clientW), static_cast<LONG>(clientH)};
         AdjustWindowRectEx(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0);
 
         std::wstring title = ToWideACP(window->title);
         if (title.empty())
-            title = L"VST Window";
+            title = kDefaultLegacyWindowTitle;
 
         HWND hwnd = CreateWindowExW(
             0,
@@ -800,10 +806,10 @@ VstIntPtr VSTPlugin2::audioMaster(
         if (hwnd == m_editorContainerHwnd || hwnd == m_editorHwnd)
             return 1;
 
-        auto it = std::remove(m_secondaryEditorWindows.begin(), m_secondaryEditorWindows.end(), hwnd);
+        auto it = std::find(m_secondaryEditorWindows.begin(), m_secondaryEditorWindows.end(), hwnd);
         if (it != m_secondaryEditorWindows.end())
         {
-            m_secondaryEditorWindows.erase(it, m_secondaryEditorWindows.end());
+            m_secondaryEditorWindows.erase(it);
             if (IsWindow(hwnd))
                 DestroyWindow(hwnd);
             return 1;
