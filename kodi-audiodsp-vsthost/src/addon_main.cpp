@@ -58,6 +58,26 @@ extern "C" void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts)
 }
 
 // ---------------------------------------------------------------------------
+// Binary addon compatibility exports
+// DllAddon::Load() requires ADDON_GetTypeVersion and optionally uses
+// ADDON_GetTypeMinVersion. Legacy ADSP addons expose type-specific API
+// version callbacks (GetAudioDSPAPIVersion/GetMinimumAudioDSPAPIVersion),
+// so map the generic binary-addon exports to the same values.
+// ---------------------------------------------------------------------------
+
+extern "C" __declspec(dllexport) const char* ADDON_GetTypeVersion(int type)
+{
+    (void)type;
+    return KODI_AE_DSP_API_VERSION;
+}
+
+extern "C" __declspec(dllexport) const char* ADDON_GetTypeMinVersion(int type)
+{
+    (void)type;
+    return KODI_AE_DSP_MIN_API_VERSION;
+}
+
+// ---------------------------------------------------------------------------
 // Helper — retrieve the per-stream processor from the opaque handle.
 // handle->dataAddress is void*; we store DSPProcessor* there.
 // ---------------------------------------------------------------------------

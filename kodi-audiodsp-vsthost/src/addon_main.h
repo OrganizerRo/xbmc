@@ -24,3 +24,7 @@ extern "C" void ADDON_SetLogCallback(VSTLogCallback_t cb);
 // retrieve the recovery-timer settings that were read from chain.json.
 // delayMs and maxAttempts are set to the current globals; null pointers are ignored.
 extern "C" void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts);
+
+// Required by Kodi's DllAddon loader when loading binary addons.
+extern "C" __declspec(dllexport) const char* ADDON_GetTypeVersion(int type);
+extern "C" __declspec(dllexport) const char* ADDON_GetTypeMinVersion(int type);

@@ -110,8 +110,9 @@ bool CActiveAEDSP::Init()
     return false;
   }
 
-  // Load the DLL directly, bypassing CAddonDll::Create() / CheckAPIVersion(),
-  // because legacy ADSP DLLs do not export ADDON_GetTypeVersion.
+  // Load the DLL directly, bypassing CAddonDll::Create() / CheckAPIVersion().
+  // DllAddon::Load() still resolves mandatory base exports, including
+  // ADDON_GetTypeVersion, which audiodsp.vsthost now provides.
   // NOTE: audiodsp.vsthost makes no callbacks into Kodi (it uses no libKODI_adsp
   // host-callback stubs), so nullptr is safe as the host-callbacks argument.
   // If a future ADSP add-on needs host callbacks this approach must be revisited.
