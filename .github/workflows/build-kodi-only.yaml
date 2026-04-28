@@ -21,6 +21,8 @@ jobs:
     runs-on: windows-2022
     env:
       WORKSPACE: ${{ github.workspace }}
+      KODI_MIRRORS: https://mirrors.kodi.tv/ http://mirrors.kodi.tv/ https://ftp.fau.de/xbmc/ http://ftp.fau.de/xbmc/
+      KODI_DOWNLOAD_RETRIES: 3
 
     steps:
       - name: Checkout
@@ -96,21 +98,19 @@ jobs:
         shell: cmd
         run: |
           setlocal EnableExtensions EnableDelayedExpansion
-          set "KODI_MIRRORS=https://mirrors.kodi.tv/ http://mirrors.kodi.tv/ https://ftp.fau.de/xbmc/ http://ftp.fau.de/xbmc/"
-          set "KODI_DOWNLOAD_RETRIES=3"
           for %%M in (%KODI_MIRRORS%) do (
             set "KODI_MIRROR=%%M"
             echo Trying KODI_MIRROR=!KODI_MIRROR!
             for /L %%R in (1,1,!KODI_DOWNLOAD_RETRIES!) do (
               echo Attempt %%R of !KODI_DOWNLOAD_RETRIES! on !KODI_MIRROR!
-              call tools\buildsteps\windows\download-dependencies.bat && goto :download_ok
+              call tools\buildsteps\windows\download-dependencies.bat && goto :download_deps_ok
               echo Download failed on !KODI_MIRROR! attempt %%R
               if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t 15 /nobreak >nul
             )
           )
           echo ERROR: Failed to download build dependencies from all configured Kodi mirrors.
           exit /b 1
-          :download_ok
+          :download_deps_ok
           echo Build dependencies downloaded successfully.
 
       # ---------------------------------------------------------------
@@ -233,21 +233,19 @@ jobs:
         shell: cmd
         run: |
           setlocal EnableExtensions EnableDelayedExpansion
-          set "KODI_MIRRORS=https://mirrors.kodi.tv/ http://mirrors.kodi.tv/ https://ftp.fau.de/xbmc/ http://ftp.fau.de/xbmc/"
-          set "KODI_DOWNLOAD_RETRIES=3"
           for %%M in (%KODI_MIRRORS%) do (
             set "KODI_MIRROR=%%M"
             echo Trying KODI_MIRROR=!KODI_MIRROR!
             for /L %%R in (1,1,!KODI_DOWNLOAD_RETRIES!) do (
               echo Attempt %%R of !KODI_DOWNLOAD_RETRIES! on !KODI_MIRROR!
-              call tools\buildsteps\windows\download-dependencies.bat && goto :download_ok
+              call tools\buildsteps\windows\download-dependencies.bat && goto :download_deps_ok
               echo Download failed on !KODI_MIRROR! attempt %%R
               if not %%R==!KODI_DOWNLOAD_RETRIES! timeout /t 15 /nobreak >nul
             )
           )
           echo ERROR: Failed to download build dependencies from all configured Kodi mirrors.
           exit /b 1
-          :download_ok
+          :download_deps_ok
           echo Build dependencies downloaded successfully.
 
       # Leia has CMakeLists.txt at repo root; use an out-of-source build dir.
