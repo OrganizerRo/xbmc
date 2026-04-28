@@ -657,32 +657,38 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
         return;
     }
 
-    // Create a dedicated child container HWND for legacy VST1/VST2 editor paths.
-    HWND editorHost = CreateWindowExW(
-        0,
-        L"STATIC",
-        L"",
-        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-        0,
-        0,
-        editorW,
-        editorH,
-        hwnd,
-        nullptr,
-        GetModuleHandleW(nullptr),
-        nullptr);
-
-    if (!editorHost)
+    void* editorParent = static_cast<void*>(hwnd);
+    if (plugin->getFormat() == IVSTPlugin::PluginFormat::VST2)
     {
-        VSTLOG(VSTLOG_ERROR,
-               "EditorBridge::doOpenEditor — failed to create child editor host for '%s': error %lu",
-               pluginPath.c_str(), GetLastError());
-        DestroyWindow(hwnd);
-        return;
+        // Older VST1/VST2 editors may expect a dedicated child/container HWND
+        // rather than the outer frame HWND.
+        HWND editorHost = CreateWindowExW(
+            0,
+            L"STATIC",
+            L"",
+            WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+            0,
+            0,
+            editorW,
+            editorH,
+            hwnd,
+            nullptr,
+            GetModuleHandleW(nullptr),
+            nullptr);
+
+        if (!editorHost)
+        {
+            VSTLOG(VSTLOG_ERROR,
+                   "EditorBridge::doOpenEditor — failed to create VST2 child editor host for '%s': error %lu",
+                   pluginPath.c_str(), GetLastError());
+            DestroyWindow(hwnd);
+            return;
+        }
+
+        editorParent = static_cast<void*>(editorHost);
     }
 
-    // Open the VST editor inside the dedicated child host window.
-    if (!plugin->openEditor(static_cast<void*>(editorHost)))
+    if (!plugin->openEditor(editorParent))
     {
         VSTLOG(VSTLOG_ERROR, "EditorBridge::doOpenEditor — plugin->openEditor() failed for '%s'",
                pluginPath.c_str());
