@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <window>
 	<defaultcontrol></defaultcontrol>
-	<onload>ActivateWindow(MusicOSD)</onload>
 	<onunload>ClearProperty(PopupMenuVisible,Home)</onunload>
 	<controls>
 		<control type="image">
@@ -20,6 +19,9 @@
 			<posy>0</posy>
 			<include>ScreenWidth</include>
 			<height>960</height>
+		</control>
+		<control type="group">
+			<include>PlayerControlCommons</include>
 		</control>
 	</controls>
 </window>
