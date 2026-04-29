@@ -254,6 +254,9 @@ int DSPChain::process(float** in, float** out, int samples)
 
     // Hold the mutex for the duration of plugin access to guard against
     // concurrent addPlugin / removePlugin calls from the settings thread.
+    // The lock is uncontended in the steady state (plugin additions are rare
+    // and user-initiated), so overhead is negligible.  A lock-free RCU or
+    // double-buffer scheme would be the ideal long-term replacement.
     std::lock_guard<std::mutex> lock(m_pluginsMutex);
 
     if (m_plugins.empty())
