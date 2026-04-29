@@ -284,7 +284,17 @@ std::string EditorBridge::processCommand(const std::string& json)
 
         DSPChain* chain = nullptr;
         IVSTPlugin* plugin = findPluginByPath(path, chain);
-        // chain is always non-null after the updated findPluginByPath.
+        // findPluginByPath always sets chain to either m_chain or &m_editorChain;
+        // it is never null.  Guard defensively in case the invariant breaks.
+        if (!chain)
+        {
+            VSTLOG(VSTLOG_ERROR,
+                   "EditorBridge::processCommand — open: no chain available for '%s'",
+                   path.c_str());
+            return "{\"status\":\"error\",\"cmd\":\"open\",\"path\":\""
+                   + JsonUtil::escape(path)
+                   + "\",\"error\":\"No chain available\"}";
+        }
 
         if (!plugin)
         {
@@ -378,6 +388,8 @@ std::string EditorBridge::processCommand(const std::string& json)
                    "EditorBridge::processCommand — add: loading plugin '%s' into chain",
                    path.c_str());
 
+            // TODO: Add a "format" field to the 'add' command when VST3 support
+            // is introduced so callers can specify the plugin format explicitly.
             if (!chain->addPlugin(path, IVSTPlugin::PluginFormat::VST2))
             {
                 VSTLOG(VSTLOG_ERROR,
