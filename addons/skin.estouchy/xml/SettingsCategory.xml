@@ -2,6 +2,7 @@
 <window>
 	<defaultcontrol>3</defaultcontrol>
 	<onunload>ClearProperty(PopupMenuVisible,Home)</onunload>
+	<include>BgVideoResume</include>
 	<controls>
 		<include>CommonBackground</include>
 		<control type="group">

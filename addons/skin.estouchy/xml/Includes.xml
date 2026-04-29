@@ -106,6 +106,12 @@
 	<include name="ScreenWidth-4x3">
 		<width>1280</width>
 	</include>
+	<!-- Restart background video when returning to a browsing window after media playback ends.
+	     Included at window root level (outside <controls>) in all CommonBackground windows. -->
+	<include name="BgVideoResume">
+		<onload condition="String.IsEqual(Skin.String(BackgroundMode),video) + !String.IsEmpty(Skin.String(CustomVideoBackground)) + !Player.HasMedia">PlayMedia($INFO[Skin.String(CustomVideoBackground)],1,noresume)</onload>
+		<onload condition="String.IsEqual(Skin.String(BackgroundMode),video) + Player.HasVideo">PlayerControl(RepeatOne)</onload>
+	</include>
 	<include name="CommonBackground">
 		<control type="image">
 			<posx>0</posx>
