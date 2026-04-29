@@ -204,6 +204,29 @@ const char* GetMinimumGUIAPIVersion()
 }
 
 // ---------------------------------------------------------------------------
+// DllAddon binary loader exports
+//
+// DllAddon::Load() (xbmc/addons/binary-addons/DllAddon.h) uses a non-optional
+// RESOLVE_METHOD_RENAME(ADDON_GetTypeVersion, ...) and an optional
+// RESOLVE_METHOD_RENAME_OPTIONAL(ADDON_GetTypeMinVersion, ...) to resolve
+// these symbols by name from the DLL before any other call is made.
+// Without ADDON_GetTypeVersion the loader logs "Unable to resolve export" and
+// aborts, causing the "failed to load DLL" error seen in the logs.
+// The 'type' parameter is the add-on type enum; ADSP add-ons always return
+// the ADSP API version string regardless of the type value.
+// ---------------------------------------------------------------------------
+
+extern "C" const char* ADDON_GetTypeVersion(int /*type*/)
+{
+    return KODI_AE_DSP_API_VERSION;
+}
+
+extern "C" const char* ADDON_GetTypeMinVersion(int /*type*/)
+{
+    return KODI_AE_DSP_MIN_API_VERSION;
+}
+
+// ---------------------------------------------------------------------------
 // Addon capabilities
 // ---------------------------------------------------------------------------
 
