@@ -73,13 +73,13 @@ extern "C" void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts)
 // doubly robust.
 // ---------------------------------------------------------------------------
 
-extern "C" __declspec(dllexport) const char* ADDON_GetTypeVersion(int type)
+const char* ADDON_GetTypeVersion(int type)
 {
     (void)type;
     return KODI_AE_DSP_API_VERSION;
 }
 
-extern "C" __declspec(dllexport) const char* ADDON_GetTypeMinVersion(int type)
+const char* ADDON_GetTypeMinVersion(int type)
 {
     (void)type;
     return KODI_AE_DSP_MIN_API_VERSION;
