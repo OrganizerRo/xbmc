@@ -122,7 +122,7 @@ bool CActiveAEDSP::Init()
     return false;
   }
   std::wstring wlibPath(static_cast<size_t>(wlen), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, wlibPath.data(), wlen);
+  MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, &wlibPath[0], wlen);
   // MultiByteToWideChar with -1 source length includes the null terminator in
   // wlen; resize to wlen-1 so the wstring length is correct and c_str()
   // returns a clean null-terminated wide string without an embedded null.
@@ -160,7 +160,7 @@ bool CActiveAEDSP::Init()
       if (mlen > 0)
       {
         std::string tmp(static_cast<size_t>(mlen), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, msgBuf, -1, tmp.data(), mlen, nullptr, nullptr);
+        WideCharToMultiByte(CP_UTF8, 0, msgBuf, -1, &tmp[0], mlen, nullptr, nullptr);
         tmp.resize(static_cast<size_t>(mlen - 1)); // drop null terminator
         // Strip trailing whitespace / newline that FormatMessage appends.
         while (!tmp.empty() && (tmp.back() == '\r' || tmp.back() == '\n' || tmp.back() == ' '))
