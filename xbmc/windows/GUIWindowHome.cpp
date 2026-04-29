@@ -21,6 +21,7 @@
 #include "Application.h"
 #include "ServiceBroker.h"
 #include "utils/StringUtils.h"
+#include "GUIUserMessages.h"
 
 CGUIWindowHome::CGUIWindowHome(void) : CGUIWindow(WINDOW_HOME, "Home.xml")
 {
@@ -159,6 +160,17 @@ bool CGUIWindowHome::OnMessage(CGUIMessage& message)
       else
         m_updateRA |= updateRA;
     }
+    break;
+
+  case GUI_MSG_PLAYBACK_ENDED:
+  case GUI_MSG_PLAYBACK_STOPPED:
+    // When the home window stays active throughout playback (e.g. audio without a
+    // visualisation window), GUI_MSG_WINDOW_INIT is never re-sent, so the skin's
+    // <onload> actions — which start the background video — are never re-evaluated.
+    // Re-running them here restarts the background video whenever playback stops
+    // while the home screen is already the active window.
+    if (IsActive())
+      RunLoadActions();
     break;
 
   default:
