@@ -123,6 +123,10 @@ bool CActiveAEDSP::Init()
   }
   std::wstring wlibPath(static_cast<size_t>(wlen), L'\0');
   MultiByteToWideChar(CP_UTF8, 0, libPath.c_str(), -1, &wlibPath[0], wlen);
+  // MultiByteToWideChar with -1 source length includes the null terminator in
+  // wlen; resize to wlen-1 so the wstring length is correct and c_str()
+  // returns a clean null-terminated wide string without an embedded null.
+  wlibPath.resize(static_cast<size_t>(wlen - 1));
 
   // Load the DLL with LoadLibraryW (Option B).
   // This bypasses DllAddon::Load(), which mandates ADDON_GetTypeVersion as a
