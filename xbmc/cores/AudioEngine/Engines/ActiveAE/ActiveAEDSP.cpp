@@ -139,14 +139,45 @@ bool CActiveAEDSP::Init()
   // for DLLs that do not implement the new CAddonBase type-version API.
   // NOTE: audiodsp.vsthost also exports ADDON_GetTypeVersion as a stub
   // (Option A) so either path succeeds independently.
+  CLog::Log(LOGINFO, "CActiveAEDSP::Init — attempting to load addon DLL '{}'", libPath);
   m_hDll = LoadLibraryW(wlibPath.c_str());
   if (!m_hDll)
   {
+    const DWORD err = GetLastError();
+    // Obtain a human-readable description for the Win32 error code so that
+    // log messages are self-explanatory without needing a separate lookup.
+    std::string errMsg;
+    LPWSTR msgBuf = nullptr;
+    if (FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                           FORMAT_MESSAGE_IGNORE_INSERTS,
+                       nullptr, err,
+                       MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                       reinterpret_cast<LPWSTR>(&msgBuf), 0, nullptr) &&
+        msgBuf)
+    {
+      // Convert the wide message to UTF-8, strip trailing CR/LF.
+      int mlen = WideCharToMultiByte(CP_UTF8, 0, msgBuf, -1, nullptr, 0, nullptr, nullptr);
+      if (mlen > 0)
+      {
+        std::string tmp(static_cast<size_t>(mlen), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, msgBuf, -1, &tmp[0], mlen, nullptr, nullptr);
+        tmp.resize(static_cast<size_t>(mlen - 1)); // drop null terminator
+        // Strip trailing whitespace / newline that FormatMessage appends.
+        while (!tmp.empty() && (tmp.back() == '\r' || tmp.back() == '\n' || tmp.back() == ' '))
+          tmp.pop_back();
+        errMsg = tmp;
+      }
+      LocalFree(msgBuf);
+    }
+    if (errMsg.empty())
+      errMsg = "unknown error";
+
     CLog::Log(LOGERROR,
-              "CActiveAEDSP::Init — LoadLibraryW failed for '{}' (error {})",
-              libPath, GetLastError());
+              "CActiveAEDSP::Init — LoadLibraryW failed for '{}': {} (error {})",
+              libPath, errMsg, err);
     return false;
   }
+  CLog::Log(LOGINFO, "CActiveAEDSP::Init — DLL loaded successfully: '{}'", libPath);
 
   // Resolve the mandatory entrypoints.
   using get_addon_t     = void (*)(AudioDSP*);
@@ -155,9 +186,11 @@ bool CActiveAEDSP::Init()
   auto getAddonFn = reinterpret_cast<get_addon_t>(GetProcAddress(m_hDll, "get_addon"));
   if (!getAddonFn)
   {
+    const DWORD err = GetLastError();
     CLog::Log(LOGERROR,
-              "CActiveAEDSP::Init — get_addon not found in '{}'; cannot fill function table",
-              libPath);
+              "CActiveAEDSP::Init — get_addon not found in '{}': "
+              "cannot fill function table (error {})",
+              libPath, err);
     FreeLibrary(m_hDll);
     m_hDll = nullptr;
     return false;
@@ -166,9 +199,10 @@ bool CActiveAEDSP::Init()
   auto createFn = reinterpret_cast<ADDON_Create_t>(GetProcAddress(m_hDll, "ADDON_Create"));
   if (!createFn)
   {
+    const DWORD err = GetLastError();
     CLog::Log(LOGERROR,
-              "CActiveAEDSP::Init — ADDON_Create not found in '{}'",
-              libPath);
+              "CActiveAEDSP::Init — ADDON_Create not found in '{}' (error {})",
+              libPath, err);
     FreeLibrary(m_hDll);
     m_hDll = nullptr;
     return false;
