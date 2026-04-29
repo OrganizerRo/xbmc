@@ -294,11 +294,17 @@ std::string EditorBridge::processCommand(const std::string& json)
             // chain.json but the running DSPChain has not been reloaded
             // (requires a Kodi restart in the normal flow).  Hot-add the
             // plugin now so the editor can be opened immediately.
+            //
+            // Format: VST3 sources are excluded from this build so the only
+            // supported format is VST2.  When VST3 support is added the
+            // 'open' command should carry an explicit "format" field.
             VSTLOG(VSTLOG_INFO,
                    "EditorBridge::processCommand — plugin '%s' not in chain; attempting hot-add",
                    path.c_str());
 
-            if (!chain->addPlugin(path, IVSTPlugin::PluginFormat::VST2))
+            const IVSTPlugin::PluginFormat hotAddFormat = IVSTPlugin::PluginFormat::VST2;
+
+            if (!chain->addPlugin(path, hotAddFormat))
             {
                 VSTLOG(VSTLOG_ERROR,
                        "EditorBridge::processCommand — hot-add failed for '%s'",
