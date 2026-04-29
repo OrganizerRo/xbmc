@@ -278,20 +278,32 @@ std::string EditorBridge::processCommand(const std::string& json)
         DSPChain* chain = nullptr;
         IVSTPlugin* plugin = findPluginByPath(path, chain);
         if (!chain)
+        {
+            VSTLOG(VSTLOG_WARN,
+                   "EditorBridge::processCommand — open requested for '%s' but no active audio chain is available",
+                   path.c_str());
             return "{\"status\":\"error\",\"cmd\":\"open\",\"path\":\""
                    + JsonUtil::escape(path)
                    + "\",\"error\":\"No active audio chain\"}";
+        }
 
         if (!plugin)
+        {
+            VSTLOG(VSTLOG_WARN,
+                   "EditorBridge::processCommand — open requested for '%s' but plugin is not in the active chain",
+                   path.c_str());
             return "{\"status\":\"error\",\"cmd\":\"open\",\"path\":\""
                    + JsonUtil::escape(path)
                    + "\",\"error\":\"Plugin not in chain\"}";
+        }
 
         if (!plugin->hasEditor())
         {
-            VSTLOG(VSTLOG_DEBUG,
-                   "EditorBridge::processCommand — plugin '%s' has no editor (effFlagsHasEditor not set)",
-                   path.c_str());
+            VSTLOG(VSTLOG_WARN,
+                   "EditorBridge::processCommand — plugin '%s' has no editor support (name='%s', loaded=%d)",
+                   path.c_str(),
+                   plugin->getName().c_str(),
+                   plugin->isLoaded() ? 1 : 0);
             return "{\"status\":\"ok\",\"cmd\":\"open\",\"path\":\""
                    + JsonUtil::escape(path)
                    + "\",\"hasEditor\":false}";
@@ -590,7 +602,12 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
     }
 
     if (!chain)
+    {
+        VSTLOG(VSTLOG_WARN,
+               "EditorBridge::doOpenEditor — no active chain while opening '%s'",
+               pluginPath.c_str());
         return;
+    }
 
     // Find the plugin
     IVSTPlugin* plugin = nullptr;
@@ -603,8 +620,22 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
         }
     }
 
-    if (!plugin || !plugin->hasEditor())
+    if (!plugin)
+    {
+        VSTLOG(VSTLOG_WARN,
+               "EditorBridge::doOpenEditor — plugin '%s' not found in active chain",
+               pluginPath.c_str());
         return;
+    }
+    if (!plugin->hasEditor())
+    {
+        VSTLOG(VSTLOG_WARN,
+               "EditorBridge::doOpenEditor — plugin '%s' has no editor support (name='%s', loaded=%d)",
+               pluginPath.c_str(),
+               plugin->getName().c_str(),
+               plugin->isLoaded() ? 1 : 0);
+        return;
+    }
 
     // Get editor size (pre-open query — may return 0x0 for some plugins until
     // after effEditOpen; we use it to size the initial window and re-query after open)
@@ -660,8 +691,13 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
     // Open the VST editor inside our window
     if (!plugin->openEditor(static_cast<void*>(hwnd)))
     {
-        VSTLOG(VSTLOG_ERROR, "EditorBridge::doOpenEditor — plugin->openEditor() failed for '%s'",
-               pluginPath.c_str());
+        VSTLOG(VSTLOG_ERROR,
+               "EditorBridge::doOpenEditor — plugin->openEditor() failed for '%s' "
+               "(name='%s', loaded=%d, hasEditor=%d)",
+               pluginPath.c_str(),
+               plugin->getName().c_str(),
+               plugin->isLoaded() ? 1 : 0,
+               plugin->hasEditor() ? 1 : 0);
         DestroyWindow(hwnd);
         return;
     }

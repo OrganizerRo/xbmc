@@ -223,10 +223,46 @@ bool VSTPlugin2::load(double sampleRate, int maxBlockSize, int numChannels)
     m_loaded = true;
     m_active = true;
 
+    const VstIntPtr vstApiVersion =
+        m_effect->dispatcher(m_effect, effGetVstVersion, 0, 0, nullptr, 0.0f);
+    const VstIntPtr vendorVersion =
+        m_effect->dispatcher(m_effect, effGetVendorVersion, 0, 0, nullptr, 0.0f);
+    const VstIntPtr canReceiveVstEvents =
+        m_effect->dispatcher(m_effect, effCanDo, 0, 0, const_cast<char*>("receiveVstEvents"), 0.0f);
+    const VstIntPtr canSendVstEvents =
+        m_effect->dispatcher(m_effect, effCanDo, 0, 0, const_cast<char*>("sendVstEvents"), 0.0f);
+    const VstIntPtr canReceiveVstMidiEvent =
+        m_effect->dispatcher(m_effect, effCanDo, 0, 0, const_cast<char*>("receiveVstMidiEvent"), 0.0f);
+    const VstIntPtr canSendVstMidiEvent =
+        m_effect->dispatcher(m_effect, effCanDo, 0, 0, const_cast<char*>("sendVstMidiEvent"), 0.0f);
+    const bool hasEditorFlag = (m_effect->flags & effFlagsHasEditor) != 0;
+    const bool canReplacing = (m_effect->flags & effFlagsCanReplacing) != 0;
+    const bool canDoubleReplacing = (m_effect->flags & effFlagsCanDoubleReplacing) != 0;
+    const bool supportsProgramChunks = (m_effect->flags & effFlagsProgramChunks) != 0;
+    const bool isSynth = (m_effect->flags & effFlagsIsSynth) != 0;
+
     VSTLOG(VSTLOG_INFO,
-           "[VSTPlugin2] Loaded '%s' — vendor: '%s', params: %d, in: %d ch, out: %d ch",
+           "[VSTPlugin2] Loaded '%s' — vendor='%s', vstApi=%lld, pluginVersion=%d, vendorVersion=%lld, uniqueId=0x%08X, flags=0x%08X, hasEditor=%d, replacing=%d, doubleReplacing=%d, programChunks=%d, isSynth=%d, params=%d, programs=%d, in=%d, out=%d, latency=%d, canDo(receiveVstEvents=%lld sendVstEvents=%lld receiveVstMidiEvent=%lld sendVstMidiEvent=%lld)",
            m_name.c_str(), m_vendor.c_str(),
-           m_effect->numParams, m_effect->numInputs, m_effect->numOutputs);
+           static_cast<long long>(vstApiVersion),
+           m_effect->version,
+           static_cast<long long>(vendorVersion),
+           static_cast<unsigned int>(m_effect->uniqueID),
+           static_cast<unsigned int>(m_effect->flags),
+           hasEditorFlag ? 1 : 0,
+           canReplacing ? 1 : 0,
+           canDoubleReplacing ? 1 : 0,
+           supportsProgramChunks ? 1 : 0,
+           isSynth ? 1 : 0,
+           m_effect->numParams,
+           m_effect->numPrograms,
+           m_effect->numInputs,
+           m_effect->numOutputs,
+           m_effect->initialDelay,
+           static_cast<long long>(canReceiveVstEvents),
+           static_cast<long long>(canSendVstEvents),
+           static_cast<long long>(canReceiveVstMidiEvent),
+           static_cast<long long>(canSendVstMidiEvent));
 
     return true;
 }
@@ -532,8 +568,22 @@ bool VSTPlugin2::hasEditor() const
 
 bool VSTPlugin2::openEditor(void* parentWindow)
 {
-    if (!m_loaded || !m_effect || !hasEditor())
+    if (!m_loaded || !m_effect)
+    {
+        VSTLOG(VSTLOG_ERROR,
+               "[VSTPlugin2] openEditor — plugin not loaded for '%s'",
+               m_path.c_str());
         return false;
+    }
+
+    if (!hasEditor())
+    {
+        VSTLOG(VSTLOG_WARN,
+               "[VSTPlugin2] openEditor — plugin reports no editor support for '%s' (flags=0x%08X)",
+               m_name.empty() ? m_path.c_str() : m_name.c_str(),
+               static_cast<unsigned int>(m_effect->flags));
+        return false;
+    }
 
     // Validate the parent window handle before passing it to the plugin.
     // A null or already-destroyed HWND would cause the plugin to embed into

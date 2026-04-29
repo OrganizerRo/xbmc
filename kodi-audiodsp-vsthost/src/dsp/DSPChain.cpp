@@ -53,7 +53,49 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
     }
 
     m_plugins.push_back(std::move(slot));
-    VSTLOG(VSTLOG_DEBUG, "[DSPChain] addPlugin: added '%s'", path.c_str());
+    const int chainIndex = static_cast<int>(m_plugins.size()) - 1;
+    const ChainPlugin& addedSlot = m_plugins.back();
+    IVSTPlugin* plugin = addedSlot.plugin.get();
+
+    const char* formatName = "unknown";
+    if (addedSlot.format == IVSTPlugin::PluginFormat::VST2)
+        formatName = "vst2";
+    else if (addedSlot.format == IVSTPlugin::PluginFormat::VST3)
+        formatName = "vst3";
+
+    std::string pluginName = "<unloaded>";
+    std::string vendorName = "<unloaded>";
+    int hasEditor = 0;
+    int paramCount = 0;
+    int latency = 0;
+    int loaded = 0;
+    int bypassed = 0;
+
+    if (plugin)
+    {
+        pluginName = plugin->getName();
+        vendorName = plugin->getVendorName();
+        if (pluginName.empty())
+            pluginName = "<unnamed>";
+        if (vendorName.empty())
+            vendorName = "<unknown>";
+        hasEditor = plugin->hasEditor() ? 1 : 0;
+        paramCount = plugin->getParameterCount();
+        latency = plugin->getLatencySamples();
+        loaded = plugin->isLoaded() ? 1 : 0;
+        bypassed = plugin->isBypassed() ? 1 : 0;
+        VSTLOG(VSTLOG_DEBUG,
+               "[DSPChain] addPlugin: chain[%d] path='%s' format=%s loaded=%d name='%s' vendor='%s' hasEditor=%d params=%d latency=%d bypassed=%d",
+               chainIndex, addedSlot.path.c_str(), formatName, loaded,
+               pluginName.c_str(), vendorName.c_str(), hasEditor, paramCount, latency, bypassed);
+    }
+    else
+    {
+        VSTLOG(VSTLOG_DEBUG,
+               "[DSPChain] addPlugin: chain[%d] path='%s' format=%s (plugin object missing)",
+               chainIndex, addedSlot.path.c_str(), formatName);
+    }
+
     return true;
 }
 
