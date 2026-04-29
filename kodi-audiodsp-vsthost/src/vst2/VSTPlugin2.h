@@ -12,8 +12,6 @@
 
 #include <string>
 #include <vector>
-#include <mutex>
-#include <unordered_set>
 #include <windows.h>
 
 // Function pointer type for the VST2 plugin entry point
@@ -146,20 +144,27 @@ private:
     VstTimeInfo m_timeInfo{};
 
     // HWND of the host window that was passed to openEditor(); used to forward
-    // audioMasterSizeWindow resize requests back to EditorBridge via PostMessage.
+    // audioMasterSizeWindow resize requests back to EditorBridge via PostMessage,
+    // and to service the legacy audioMasterOpenWindow callback by reusing this
+    // window when called during effEditOpen.
     HWND m_editorHwnd = nullptr;
 
-    // Guard to distinguish primary editor open from legacy secondary window
-    // requests that can happen during effEditOpen.
+    // True while callEditOpenSafe() is executing, so the audioMasterOpenWindow
+    // handler knows it is being called during effEditOpen (primary-editor request)
+    // vs. at idle time (secondary-window request).
+    // audioMasterOpenWindow is only ever called on the UI thread, so no mutex
+    // is needed to protect this flag or m_auxWindows.
     bool m_inEffEditOpen = false;
 
     // Stable buffer for audioMasterGetDirectory.
     std::string m_pluginDirectory;
     std::vector<char> m_pluginDirectoryBuffer;
 
-    // Legacy auxiliary windows requested by audioMasterOpenWindow.
-    std::unordered_set<HWND> m_auxWindows;
-    std::mutex               m_auxWindowMutex;
+    // Legacy auxiliary windows requested via the deprecated audioMasterOpenWindow
+    // callback (VST 1 / VST 2.0/2.1 era plugins that call this from idle for
+    // secondary UI).  All are closed in closeEditor() and unload().
+    // Accessed only on the UI thread — no synchronisation needed.
+    std::vector<HWND> m_auxWindows;
 
     // Scratch buffers — allocated once in load(), reused every process() call
     std::vector<std::vector<float>> m_inputBufs;
