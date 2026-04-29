@@ -44,7 +44,11 @@ public:
     // -------------------------------------------------------------------------
 
     /// Load a plugin from disk and append it to the chain.
-    /// If the chain is already initialized, the plugin is loaded immediately.
+    /// The plugin DLL is always loaded immediately using the chain's current
+    /// sample-rate / block-size / channel settings (defaults: 44100 Hz, 1024
+    /// frames, 2 channels when the chain has not yet been initialized for audio).
+    /// A subsequent initialize() call will reload the plugin with the stream's
+    /// actual parameters.
     /// @param path    Absolute path to the VST plugin .dll file.
     /// @param format  PluginFormat::VST2 (other formats are rejected).
     /// @return true on success.

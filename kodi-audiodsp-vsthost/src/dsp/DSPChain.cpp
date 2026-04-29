@@ -42,14 +42,18 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
     slot.format = format;
     slot.plugin = std::make_unique<VSTPlugin2>(path);
 
-    if (m_initialized)
+    // Always load the plugin DLL immediately.  When the chain has been
+    // initialized for audio (m_initialized == true) we use the stream's
+    // sample-rate / block-size; otherwise we fall back to the default values
+    // (44100 Hz, 1024 frames, 2 channels).  Loading unconditionally means the
+    // plugin's capabilities (hasEditor, parameter count, etc.) are available as
+    // soon as addPlugin returns, regardless of whether an audio stream is active.
+    // A subsequent initialize() call will reload the plugin with the correct
+    // stream parameters.
+    if (!slot.plugin->load(m_sampleRate, m_blockSize, m_numChannels))
     {
-        if (!slot.plugin->load(m_sampleRate, m_blockSize, m_numChannels))
-        {
-            // Log but do not abort — caller decides whether to retry
-            VSTLOG(VSTLOG_ERROR, "[DSPChain] addPlugin: failed to load '%s'", path.c_str());
-            return false;
-        }
+        VSTLOG(VSTLOG_ERROR, "[DSPChain] addPlugin: failed to load '%s'", path.c_str());
+        return false;
     }
 
     // Append to the chain under the mutex so the audio thread's process()

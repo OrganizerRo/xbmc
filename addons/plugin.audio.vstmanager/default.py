@@ -48,6 +48,7 @@ sys.path.insert(0, os.path.join(ADDON_PATH, 'resources', 'lib'))
 
 from chain_manager import ChainManager      # noqa: E402
 from plugin_scanner import PluginScanner    # noqa: E402
+from editor_bridge import add_plugin as bridge_add_plugin      # noqa: E402
 from editor_bridge import open_editor as bridge_open_editor   # noqa: E402
 from editor_bridge import close_editor as bridge_close_editor  # noqa: E402
 from editor_bridge import list_parameters as bridge_list_parameters  # noqa: E402
@@ -186,7 +187,20 @@ def action_add(params):
         log('Added plugin to chain: %s' % path)
         # Refresh the listing so the prefix changes from + to -
         xbmc.executebuiltin('Container.Refresh')
-        # Show the VST UI for the newly added plugin
+        # Ask the C++ addon to hot-load the plugin into the running chain and
+        # open its editor window via the named pipe.  This works whether or not
+        # an audio stream is currently active: the addon will load the plugin
+        # into its editor-only chain if no stream is open.
+        result = bridge_add_plugin(path)
+        if result and result.get('status') == 'ok':
+            if result.get('hasEditor') is True:
+                log('VST editor opened for: %s' % name)
+                return
+            # Plugin loaded but has no native editor — try parameter fallback
+            if _show_parameter_fallback(name, path):
+                return
+        # Bridge unreachable or plugin has no editor and no parameters —
+        # fall back to the metadata-only info dialog.
         show_vst_ui(params)
     except Exception as exc:
         log('Failed to add plugin %s: %s' % (path, exc), xbmc.LOGERROR)
