@@ -775,8 +775,8 @@ VstIntPtr VSTPlugin2::audioMaster(
             if (vw->title[0] != '\0')
             {
                 wchar_t wtitle[128] = {};
-                MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, _countof(wtitle));
-                SetWindowTextW(m_editorHwnd, wtitle);
+                if (MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, _countof(wtitle)) > 0)
+                    SetWindowTextW(m_editorHwnd, wtitle);
             }
             vw->winHandle = m_editorHwnd;
             VSTLOG(VSTLOG_DEBUG,
@@ -812,7 +812,10 @@ VstIntPtr VSTPlugin2::audioMaster(
 
         wchar_t wtitle[128] = L"VST Editor";
         if (vw->title[0] != '\0')
-            MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, _countof(wtitle));
+        {
+            if (MultiByteToWideChar(CP_ACP, 0, vw->title, -1, wtitle, _countof(wtitle)) == 0)
+                wcsncpy_s(wtitle, _countof(wtitle), L"VST Editor", _TRUNCATE);
+        }
 
         RECT wr = {0, 0, w, h};
         AdjustWindowRectEx(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0);
