@@ -16,17 +16,21 @@
 #include "kodi_adsp_dll.h"   // Kodi will find this via include path
 #include "util/VSTLog.h"
 
+#if defined(_WIN32)
+  #define VSTHOST_EXPORT extern "C" __declspec(dllexport)
+#else
+  #define VSTHOST_EXPORT extern "C"
+#endif
+
 // Called by CActiveAEDSP::Init() (via GetProcAddress) to route all addon log
-// messages into kodi.log.  Must be exported from the DLL as a plain C symbol.
-extern "C" void ADDON_SetLogCallback(VSTLogCallback_t cb);
+// messages into kodi.log.
+VSTHOST_EXPORT void ADDON_SetLogCallback(VSTLogCallback_t cb);
 
 // Called by CActiveAEDSP::Init() (via GetProcAddress) after ADDON_Create to
 // retrieve the recovery-timer settings that were read from chain.json.
 // delayMs and maxAttempts are set to the current globals; null pointers are ignored.
-extern "C" void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts);
+VSTHOST_EXPORT void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts);
 
-// DllAddon compatibility stubs — ADDON_GetTypeVersion is required (non-optional)
-// by DllAddon::Load() via RESOLVE_METHOD_RENAME.  Returning the compiled DSP API
-// version satisfies the resolver without introducing a false version mismatch.
-extern "C" const char* ADDON_GetTypeVersion(int type);
-extern "C" const char* ADDON_GetTypeMinVersion(int type);
+// DllAddon compatibility stubs — DllAddon::Load() may require these symbols.
+VSTHOST_EXPORT const char* ADDON_GetTypeVersion(int type);
+VSTHOST_EXPORT const char* ADDON_GetTypeMinVersion(int type);
