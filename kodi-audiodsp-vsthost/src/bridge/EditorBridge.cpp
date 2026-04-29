@@ -890,6 +890,21 @@ LRESULT EditorBridge::handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             }
             return 0;
         }
+        if (msg == WM_VSTBRIDGE_REFRESH)
+        {
+            InvalidateRect(hwnd, nullptr, FALSE);
+            EnumChildWindows(
+                hwnd,
+                [](HWND child, LPARAM) noexcept -> BOOL
+                {
+                    // Best-effort repaint hint; child lifetime can race teardown.
+                    if (IsWindow(child))
+                        InvalidateRect(child, nullptr, FALSE);
+                    return TRUE;
+                },
+                0);
+            return 0;
+        }
         break;
     }
 
