@@ -33,11 +33,14 @@
 #include <chrono>
 #include <vector>
 
-// Forward-declare legacy ADSP types so we avoid pulling in Windows headers in
-// files that only include this header.
+#ifdef TARGET_WINDOWS
+#include <windows.h>
+#endif
+
+// Forward-declare legacy ADSP types so we avoid pulling in the full legacy
+// ADSP headers in files that only include this header.
 struct AudioDSP;
 struct ADDON_HANDLE_STRUCT;
-class DllAddon;
 
 namespace ActiveAE
 {
@@ -103,7 +106,7 @@ private:
   void StreamCreate(const AEAudioFormat& fmt);
   void StreamDestroy();
 
-  DllAddon*            m_dll    = nullptr;
+  HMODULE              m_hDll   = nullptr;
   AudioDSP*            m_funcs  = nullptr;   ///< heap-alloc'd to avoid large struct in header
   ADDON_HANDLE_STRUCT* m_handle = nullptr;   ///< per-stream handle
 

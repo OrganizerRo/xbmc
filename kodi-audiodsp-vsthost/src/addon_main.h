@@ -24,3 +24,9 @@ extern "C" void ADDON_SetLogCallback(VSTLogCallback_t cb);
 // retrieve the recovery-timer settings that were read from chain.json.
 // delayMs and maxAttempts are set to the current globals; null pointers are ignored.
 extern "C" void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts);
+
+// DllAddon compatibility stubs — ADDON_GetTypeVersion is required (non-optional)
+// by DllAddon::Load() via RESOLVE_METHOD_RENAME.  Returning the compiled DSP API
+// version satisfies the resolver without introducing a false version mismatch.
+extern "C" const char* ADDON_GetTypeVersion(int type);
+extern "C" const char* ADDON_GetTypeMinVersion(int type);

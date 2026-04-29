@@ -58,6 +58,34 @@ extern "C" void ADDON_GetRecoveryParams(int* delayMs, int* maxAttempts)
 }
 
 // ---------------------------------------------------------------------------
+// DllAddon compatibility exports
+//
+// DllAddon::Load() (xbmc/addons/binary-addons/DllAddon.h) uses
+// RESOLVE_METHOD_RENAME — a non-optional GetProcAddress call — to look up
+// ADDON_GetTypeVersion.  If the symbol is absent, Load() fails with:
+//
+//   Win32DllLoader::ResolveExport – Unable to resolve: … ADDON_GetTypeVersion
+//   Unable to resolve exports from dll …
+//
+// Exporting these stubs (Option A) ensures the symbol is present so that any
+// loader path that goes through DllAddon succeeds.  CActiveAEDSP::Init() also
+// bypasses DllAddon entirely via LoadLibraryW (Option B), making the fix
+// doubly robust.
+// ---------------------------------------------------------------------------
+
+extern "C" __declspec(dllexport) const char* ADDON_GetTypeVersion(int type)
+{
+    (void)type;
+    return KODI_AE_DSP_API_VERSION;
+}
+
+extern "C" __declspec(dllexport) const char* ADDON_GetTypeMinVersion(int type)
+{
+    (void)type;
+    return KODI_AE_DSP_MIN_API_VERSION;
+}
+
+// ---------------------------------------------------------------------------
 // Helper — retrieve the per-stream processor from the opaque handle.
 // handle->dataAddress is void*; we store DSPProcessor* there.
 // ---------------------------------------------------------------------------
