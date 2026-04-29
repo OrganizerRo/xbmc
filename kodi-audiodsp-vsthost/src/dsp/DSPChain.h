@@ -7,6 +7,7 @@
 #include "../plugin/IVSTPlugin.h"
 #include <vector>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <cstdint>
 
@@ -20,13 +21,17 @@ struct ChainPlugin {
 /// Ordered chain of VST plugins.
 ///
 /// Thread safety contract:
-///   - addPlugin / removePlugin / movePlugin / clear — call ONLY from the
-///     settings/stream thread with audio stopped or the chain locked externally.
+///   - addPlugin / removePlugin — may be called from any non-audio thread
+///     concurrently with process(); m_pluginsMutex serialises vector mutation.
+///   - movePlugin / clear — call only from the settings/stream thread with
+///     audio stopped (not mutex-protected).
 ///   - initialize / shutdown — settings/stream thread only.
-///   - process — audio render thread ONLY; no allocations, no locks.
+///   - process — audio render thread; acquires m_pluginsMutex for the
+///     duration of the plugin iteration loop.
 ///   - setPluginParameter — any thread (delegates to IVSTPlugin::setParameter).
 ///   - getPluginParameter / getPluginParameterCount / getPluginParameterName —
 ///     any thread (approximately safe for display).
+///   - getPlugin / getPluginCount — any thread; protected by m_pluginsMutex.
 ///   - serializeToJson / deserializeFromJson — settings thread.
 class DSPChain {
 public:
@@ -71,7 +76,8 @@ public:
 
     // -------------------------------------------------------------------------
     // Audio processing — real-time audio thread
-    // No allocations, no locks, no I/O.
+    // No allocations, no I/O.  Acquires m_pluginsMutex briefly to guard
+    // against concurrent addPlugin / removePlugin on the settings thread.
     // -------------------------------------------------------------------------
 
     /// Process one block through the entire chain via ping-pong buffers.
@@ -106,7 +112,7 @@ public:
     // Queries
     // -------------------------------------------------------------------------
 
-    int getPluginCount() const { return static_cast<int>(m_plugins.size()); }
+    int getPluginCount() const;
 
     /// Sum of getLatencySamples() for all non-bypassed plugins.
     int getTotalLatencySamples() const;
@@ -122,6 +128,11 @@ public:
 
 private:
     std::vector<ChainPlugin> m_plugins;
+
+    /// Guards m_plugins against concurrent access from the audio thread
+    /// (process) and the settings/pipe thread (addPlugin, removePlugin,
+    /// getPlugin, getPluginCount).
+    mutable std::mutex m_pluginsMutex;
 
     double m_sampleRate  = 44100.0;
     int    m_blockSize   = 1024;

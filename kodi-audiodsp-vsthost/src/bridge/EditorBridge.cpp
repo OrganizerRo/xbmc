@@ -289,12 +289,39 @@ std::string EditorBridge::processCommand(const std::string& json)
 
         if (!plugin)
         {
-            VSTLOG(VSTLOG_WARN,
-                   "EditorBridge::processCommand — open requested for '%s' but plugin is not in the active chain",
+            // Plugin not found in the active in-memory chain.  This happens
+            // when the Python VST Manager has just appended the plugin to
+            // chain.json but the running DSPChain has not been reloaded
+            // (requires a Kodi restart in the normal flow).  Hot-add the
+            // plugin now so the editor can be opened immediately.
+            VSTLOG(VSTLOG_INFO,
+                   "EditorBridge::processCommand — plugin '%s' not in chain; attempting hot-add",
                    path.c_str());
-            return "{\"status\":\"error\",\"cmd\":\"open\",\"path\":\""
-                   + JsonUtil::escape(path)
-                   + "\",\"error\":\"Plugin not in chain\"}";
+
+            if (!chain->addPlugin(path, IVSTPlugin::PluginFormat::VST2))
+            {
+                VSTLOG(VSTLOG_ERROR,
+                       "EditorBridge::processCommand — hot-add failed for '%s'",
+                       path.c_str());
+                return "{\"status\":\"error\",\"cmd\":\"open\",\"path\":\""
+                       + JsonUtil::escape(path)
+                       + "\",\"error\":\"Plugin not in chain and hot-add failed\"}";
+            }
+
+            // Re-find the plugin now that it has been added.
+            plugin = findPluginByPath(path, chain);
+            if (!plugin)
+            {
+                VSTLOG(VSTLOG_ERROR,
+                       "EditorBridge::processCommand — plugin '%s' still not found after hot-add",
+                       path.c_str());
+                return "{\"status\":\"error\",\"cmd\":\"open\",\"path\":\""
+                       + JsonUtil::escape(path)
+                       + "\",\"error\":\"Plugin not found after hot-add\"}";
+            }
+            VSTLOG(VSTLOG_INFO,
+                   "EditorBridge::processCommand — hot-add succeeded for '%s'",
+                   path.c_str());
         }
 
         if (!plugin->hasEditor())
