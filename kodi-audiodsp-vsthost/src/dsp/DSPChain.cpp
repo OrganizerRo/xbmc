@@ -52,15 +52,22 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
         }
     }
 
-    m_plugins.push_back(std::move(slot));
-    const int chainIndex = static_cast<int>(m_plugins.size()) - 1;
-    const ChainPlugin& addedSlot = m_plugins.back();
-    IVSTPlugin* plugin = addedSlot.plugin.get();
+    // Append to the chain under the mutex so the audio thread's process()
+    // loop cannot race with a vector reallocation.
+    int chainIndex = 0;
+    IVSTPlugin* plugin = slot.plugin.get();
+    const std::string slotPath   = slot.path;
+    const IVSTPlugin::PluginFormat slotFormat = slot.format;
+    {
+        std::lock_guard<std::mutex> lock(m_pluginsMutex);
+        chainIndex = static_cast<int>(m_plugins.size());
+        m_plugins.push_back(std::move(slot));
+    }
 
     const char* formatName = "unknown";
-    if (addedSlot.format == IVSTPlugin::PluginFormat::VST2)
+    if (slotFormat == IVSTPlugin::PluginFormat::VST2)
         formatName = "vst2";
-    else if (addedSlot.format == IVSTPlugin::PluginFormat::VST3)
+    else if (slotFormat == IVSTPlugin::PluginFormat::VST3)
         formatName = "vst3";
 
     std::string pluginName = "<unloaded>";
@@ -86,14 +93,14 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
         bypassed = plugin->isBypassed() ? 1 : 0;
         VSTLOG(VSTLOG_DEBUG,
                "[DSPChain] addPlugin: chain[%d] path='%s' format=%s loaded=%d name='%s' vendor='%s' hasEditor=%d params=%d latency=%d bypassed=%d",
-               chainIndex, addedSlot.path.c_str(), formatName, loaded,
+               chainIndex, slotPath.c_str(), formatName, loaded,
                pluginName.c_str(), vendorName.c_str(), hasEditor, paramCount, latency, bypassed);
     }
     else
     {
         VSTLOG(VSTLOG_DEBUG,
                "[DSPChain] addPlugin: chain[%d] path='%s' format=%s (plugin object missing)",
-               chainIndex, addedSlot.path.c_str(), formatName);
+               chainIndex, slotPath.c_str(), formatName);
     }
 
     return true;
@@ -101,6 +108,7 @@ bool DSPChain::addPlugin(const std::string& path, IVSTPlugin::PluginFormat forma
 
 bool DSPChain::removePlugin(int index)
 {
+    std::lock_guard<std::mutex> lock(m_pluginsMutex);
     if (index < 0 || index >= static_cast<int>(m_plugins.size()))
         return false;
 
@@ -244,6 +252,13 @@ int DSPChain::process(float** in, float** out, int samples)
     // Clamp to the allocated buffer size to prevent heap overflow.
     const int safeSamples = (samples > m_blockSize) ? m_blockSize : samples;
 
+    // Hold the mutex for the duration of plugin access to guard against
+    // concurrent addPlugin / removePlugin calls from the settings thread.
+    // The lock is uncontended in the steady state (plugin additions are rare
+    // and user-initiated), so overhead is negligible.  A lock-free RCU or
+    // double-buffer scheme would be the ideal long-term replacement.
+    std::lock_guard<std::mutex> lock(m_pluginsMutex);
+
     if (m_plugins.empty())
     {
         // Passthrough — no plugins in chain.
@@ -334,9 +349,16 @@ int DSPChain::getTotalLatencySamples() const
 
 IVSTPlugin* DSPChain::getPlugin(int index)
 {
+    std::lock_guard<std::mutex> lock(m_pluginsMutex);
     if (index < 0 || index >= static_cast<int>(m_plugins.size()))
         return nullptr;
     return m_plugins[index].plugin.get();
+}
+
+int DSPChain::getPluginCount() const
+{
+    std::lock_guard<std::mutex> lock(m_pluginsMutex);
+    return static_cast<int>(m_plugins.size());
 }
 
 // =============================================================================
