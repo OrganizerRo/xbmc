@@ -521,8 +521,7 @@
 			<include>VisibleFadeEffect</include>
 			<include>16x9_xPos_Relocation</include>
 			<!-- Hide now-playing strip for custom Home video backgrounds only -->
-			<visible>Player.HasMedia + ![Window.IsVisible(busydialog) | Window.IsVisible(Notification) | Window.IsVisible(volumebar)]</visible>
-			<visible>!String.IsEqual($VAR[HideNowPlayingForCustomVideoBackground],true)</visible>
+			<visible>Player.HasMedia + ![Window.IsVisible(busydialog) | Window.IsVisible(Notification) | Window.IsVisible(volumebar)] + !String.IsEqual($VAR[HideNowPlayingForCustomVideoBackground],true)</visible>
 			<control type="button">
 				<description>Volume Button</description>
 				<posx>13</posx>
