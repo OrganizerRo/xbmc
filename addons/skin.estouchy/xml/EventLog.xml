@@ -3,6 +3,7 @@
 	<defaultcontrol always="true">500</defaultcontrol>
 	<views>500</views>
 	<onunload>ClearProperty(PopupMenuVisible,Home)</onunload>
+	<include>BgVideoResume</include>
 	<controls>
 		<include>CommonBackground</include>
 		<include>SideMenu</include>

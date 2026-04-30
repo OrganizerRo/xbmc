@@ -2,6 +2,7 @@
 <window>
 	<defaultcontrol always="true">9000</defaultcontrol>
 	<onunload>ClearProperty(PopupMenuVisible,Home)</onunload>
+	<include>BgVideoResume</include>
 	<controls>
 		<include>CommonBackground</include>
 		<include content="SettingsPanel" condition="String.IsEqual(Skin.AspectRatio,16:9)">

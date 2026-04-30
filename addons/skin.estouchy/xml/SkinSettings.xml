@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <window>
 	<defaultcontrol>91</defaultcontrol>
+	<include>BgVideoResume</include>
 	<controls>
 		<include>CommonBackground</include>
 		<control type="group">
