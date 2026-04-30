@@ -131,6 +131,12 @@ void EditorBridge::setChain(DSPChain* chain)
     m_chain = chain;
 }
 
+DSPChain* EditorBridge::getEffectiveChain()
+{
+    std::lock_guard<std::mutex> lock(m_editorMutex);
+    return m_chain ? m_chain : &m_editorChain;
+}
+
 // ============================================================================
 // Pipe server
 // ============================================================================
@@ -231,8 +237,9 @@ std::string EditorBridge::processCommand(const std::string& json)
             std::lock_guard<std::mutex> lock(m_editorMutex);
             chainOut = m_chain;
         }
+        // Fall back to the editor-only chain when no audio stream is active.
         if (!chainOut)
-            return nullptr;
+            chainOut = &m_editorChain;
         for (int i = 0; i < chainOut->getPluginCount(); ++i)
         {
             auto* p = chainOut->getPlugin(i);
@@ -277,14 +284,16 @@ std::string EditorBridge::processCommand(const std::string& json)
 
         DSPChain* chain = nullptr;
         IVSTPlugin* plugin = findPluginByPath(path, chain);
+        // findPluginByPath always sets chain to either m_chain or &m_editorChain;
+        // it is never null.  Guard defensively in case the invariant breaks.
         if (!chain)
         {
-            VSTLOG(VSTLOG_WARN,
-                   "EditorBridge::processCommand — open requested for '%s' but no active audio chain is available",
+            VSTLOG(VSTLOG_ERROR,
+                   "EditorBridge::processCommand — open: no chain available for '%s'",
                    path.c_str());
             return "{\"status\":\"error\",\"cmd\":\"open\",\"path\":\""
                    + JsonUtil::escape(path)
-                   + "\",\"error\":\"No active audio chain\"}";
+                   + "\",\"error\":\"No chain available\"}";
         }
 
         if (!plugin)
@@ -357,6 +366,75 @@ std::string EditorBridge::processCommand(const std::string& json)
         return "{\"status\":\"ok\",\"cmd\":\"open\",\"path\":\""
                + JsonUtil::escape(path)
                + "\",\"hasEditor\":true}";
+    }
+
+    if (cmd == "add")
+    {
+        // "add" — explicitly add the VST plugin at 'path' to the running chain
+        // (stream chain when active, editor-only chain otherwise) and
+        // immediately open its editor window.  Unlike 'open', this command
+        // is intended to be called by the Python VST Manager right after
+        // writing the plugin entry to chain.json, so that the editor appears
+        // without requiring Kodi to restart or a new audio stream to begin.
+        if (path.empty())
+            return "{\"status\":\"error\",\"cmd\":\"add\",\"error\":\"Missing path\"}";
+
+        DSPChain* chain = nullptr;
+        IVSTPlugin* plugin = findPluginByPath(path, chain);
+
+        if (!plugin)
+        {
+            VSTLOG(VSTLOG_INFO,
+                   "EditorBridge::processCommand — add: loading plugin '%s' into chain",
+                   path.c_str());
+
+            // TODO: Add a "format" field to the 'add' command when VST3 support
+            // is introduced so callers can specify the plugin format explicitly.
+            if (!chain->addPlugin(path, IVSTPlugin::PluginFormat::VST2))
+            {
+                VSTLOG(VSTLOG_ERROR,
+                       "EditorBridge::processCommand — add: failed to load plugin '%s'",
+                       path.c_str());
+                return "{\"status\":\"error\",\"cmd\":\"add\",\"path\":\""
+                       + JsonUtil::escape(path)
+                       + "\",\"error\":\"Failed to load plugin\"}";
+            }
+
+            plugin = findPluginByPath(path, chain);
+            if (!plugin)
+            {
+                VSTLOG(VSTLOG_ERROR,
+                       "EditorBridge::processCommand — add: plugin '%s' not found after load",
+                       path.c_str());
+                return "{\"status\":\"error\",\"cmd\":\"add\",\"path\":\""
+                       + JsonUtil::escape(path)
+                       + "\",\"error\":\"Plugin not found after load\"}";
+            }
+        }
+
+        const bool hasEd = plugin->hasEditor();
+        VSTLOG(VSTLOG_INFO,
+               "EditorBridge::processCommand — add: plugin '%s' loaded (name='%s', hasEditor=%d)",
+               path.c_str(), plugin->getName().c_str(), hasEd ? 1 : 0);
+
+        if (hasEd)
+        {
+            auto* pathCopy = new std::string(path);
+            if (!PostThreadMessageW(m_uiThreadID, WM_VSTBRIDGE_OPEN, 0,
+                                    reinterpret_cast<LPARAM>(pathCopy)))
+            {
+                delete pathCopy;
+                return "{\"status\":\"error\",\"cmd\":\"add\",\"path\":\""
+                       + JsonUtil::escape(path)
+                       + "\",\"error\":\"Failed to post open to UI thread\"}";
+            }
+        }
+
+        return std::string("{\"status\":\"ok\",\"cmd\":\"add\",\"path\":\"")
+               + JsonUtil::escape(path)
+               + "\",\"hasEditor\":"
+               + (hasEd ? "true" : "false")
+               + "}";
     }
 
     if (cmd == "close")
@@ -633,14 +711,9 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
         std::lock_guard<std::mutex> lock(m_editorMutex);
         chain = m_chain;
     }
-
+    // Fall back to the editor-only chain when no audio stream is active.
     if (!chain)
-    {
-        VSTLOG(VSTLOG_WARN,
-               "EditorBridge::doOpenEditor — no active chain while opening '%s'",
-               pluginPath.c_str());
-        return;
-    }
+        chain = &m_editorChain;
 
     // Find the plugin
     IVSTPlugin* plugin = nullptr;
@@ -876,8 +949,11 @@ LRESULT EditorBridge::handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                     pluginPath = it->second;
                 chain = m_chain;
             }
+            // Use editor-only chain as fallback when no stream is active.
+            if (!chain)
+                chain = &m_editorChain;
 
-            if (!pluginPath.empty() && chain)
+            if (!pluginPath.empty())
             {
                 for (int i = 0; i < chain->getPluginCount(); ++i)
                 {
@@ -905,10 +981,13 @@ LRESULT EditorBridge::handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                 pluginPath = it->second;
             chain = m_chain;
         }
+        // Use editor-only chain as fallback when no stream is active.
+        if (!chain)
+            chain = &m_editorChain;
 
         // Close the VST editor before destroying the window.
         // The lock is already released here, so WM_DESTROY can acquire it.
-        if (!pluginPath.empty() && chain)
+        if (!pluginPath.empty())
         {
             for (int i = 0; i < chain->getPluginCount(); ++i)
             {

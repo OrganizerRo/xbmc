@@ -99,6 +99,23 @@ def _send_command(cmd_dict):
         return None
 
 
+def add_plugin(plugin_path):
+    """Request the C++ addon to load a VST plugin into the active chain and
+    open its editor window.
+
+    This command is intended to be sent immediately after writing the plugin
+    entry to chain.json.  It hot-loads the plugin into the running DSPChain
+    (using the audio-stream chain when active, or an editor-only chain
+    otherwise) and opens the editor window, so the UI appears without requiring
+    a Kodi restart.
+
+    :param plugin_path: Absolute filesystem path to the VST plugin .dll file.
+    :returns: A dict with the response, or None if the bridge is unreachable.
+              On success: ``{'status': 'ok', 'cmd': 'add', 'hasEditor': True/False}``
+    """
+    return _send_command({'cmd': 'add', 'path': plugin_path})
+
+
 def open_editor(plugin_path):
     """Request the C++ addon to open a native VST editor window.
 

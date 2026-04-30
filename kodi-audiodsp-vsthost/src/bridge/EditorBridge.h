@@ -104,7 +104,23 @@ private:
     /// Maximum milliseconds to wait for the UI thread or pipe thread to start.
     static constexpr DWORD STARTUP_TIMEOUT_MS  = 5000;
 
+    /// Audio stream chain — set by setChain() when a Kodi audio stream is
+    /// created, null when no stream is active.
     DSPChain*           m_chain = nullptr;
+
+    /// Editor-only chain — always available, used as a fallback when no audio
+    /// stream is active (m_chain == nullptr).  Plugins are loaded into this
+    /// chain with default audio parameters (44100 Hz, 1024 frames, stereo)
+    /// purely so their capabilities (hasEditor, parameter list) can be queried
+    /// and their editor windows displayed.
+    DSPChain            m_editorChain;
+
+    /// Return the effective DSPChain for the current state.
+    /// When an audio stream is active (m_chain != nullptr) the stream chain
+    /// is returned; otherwise the editor-only chain is returned.
+    /// Must NOT be called under m_editorMutex.
+    DSPChain* getEffectiveChain();
+
     std::atomic<bool>   m_running{false};
     std::thread         m_pipeThread;
     std::thread         m_uiThread;
