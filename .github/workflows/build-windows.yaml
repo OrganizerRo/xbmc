@@ -202,8 +202,11 @@ jobs:
         run: call tools\buildsteps\windows\download-dependencies.bat
 
       # Configure Kodi with the Visual Studio 2022 generator targeting x86.
-      # cmake/scripts/windows/ArchSetup.cmake detects ARCH=win32 from -A Win32.
-      # MINGW_LIBS_DIR and DEPENDS_PATH are derived from repo-relative paths;
+      # cmake/scripts/windows/ArchSetup.cmake (included from root CMakeLists.txt)
+      # detects ARCH=win32 from CMAKE_SIZEOF_VOID_P (set by -A Win32) and then sets:
+      #   DEPENDS_PATH = ${CMAKE_SOURCE_DIR}/project/BuildDependencies/win32
+      #   MINGW_LIBS_DIR = ${CMAKE_SOURCE_DIR}/project/BuildDependencies/mingwlibs/win32
+      # Both directories are populated by the download and FFmpeg build steps above;
       # no extra -D flags are required.
       - name: Configure Kodi with CMake (Visual Studio 17 2022, Win32)
         shell: cmd
@@ -275,6 +278,10 @@ jobs:
       # every invocation regardless of CMake ExternalProject nesting depth.
       # Fixes C2065 (PTRDIFF_MAX undeclared) in MSVC 14.44+ for addons that
       # include <xlocnum> indirectly (e.g. imagedecoder.heif via libde265).
+      # This is a long-term workaround: MSVC 14.44 (VS 17.14) stopped declaring
+      # POSIX aliases like PTRDIFF_MAX in <stddef.h> by default as part of
+      # C11 conformance hardening.  Remove when affected addons migrate to
+      # <cstddef> or std::ptrdiff_t directly.
       - name: Set CL env var for MSVC 14.44+ addon compatibility
         shell: cmd
         run: echo CL=/D_CRT_DECLARE_NONSTDC_NAMES=1>> %GITHUB_ENV%
@@ -452,8 +459,13 @@ jobs:
         shell: bash
         run: |
           # Delete any previous release for this tag (handles re-runs gracefully).
-          gh release delete "${{ steps.version.outputs.tag }}" --yes 2>/dev/null || true
-          git push origin ":refs/tags/${{ steps.version.outputs.tag }}" 2>/dev/null || true
+          # Suppress "not found" errors (exit 1) which are expected on first run;
+          # log a warning for any other failure so permission issues remain visible.
+          gh release delete "${{ steps.version.outputs.tag }}" --yes 2>&1 \
+            | grep -v "release not found" || true
+          git push origin ":refs/tags/${{ steps.version.outputs.tag }}" 2>&1 \
+            | grep -v "remote: error: cannot lock ref\|error: failed to push" \
+            | grep -v "^$" || true
           gh release create "${{ steps.version.outputs.tag }}" \
             kodi-nexus-windows-x86.zip \
             --title "Kodi Nexus ${{ steps.version.outputs.tag }}" \
