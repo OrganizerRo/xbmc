@@ -1,0 +1,510 @@
+name: Build Kodi Nexus for Windows
+
+# Repository secret ORGANIZERRO_PAT: same value as local .git/organizerro_pat.txt
+# (required for gh release as OrganizerRo).  Checkout falls back to github.token
+# when the secret is unset so forks / public clones can still run builds.
+#
+# Design notes: docs/build/nexus-windows-build-plan.md
+# CMake analysis:  docs/build/nexus-cmake-windows.md
+# Leia/Nexus diff: docs/build/leia-vs-nexus-comparison.md
+
+on:
+  push:
+    branches:
+      - copilot/nexus-build-workflow
+      - Nexus
+  pull_request:
+    branches:
+      - copilot/nexus-build-workflow
+      - Nexus
+  # workflow_dispatch has no `branches` key in GitHub's schema;
+  # manual runs use the branch selected in the UI.
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Target environment'
+        required: true
+        default: 'Nexus'
+
+permissions:
+  contents: write
+
+jobs:
+  build-kodi-nexus:
+    name: Build Kodi Nexus (Windows ${{ matrix.arch }})
+    runs-on: windows-2022
+
+    # Both architectures run in parallel on separate runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            cmake_arch: Win32
+            dep_target: win32
+            msys_system: MINGW32
+            mingw_prefix: /mingw32
+            mingw_chost: i686-w64-mingw32
+            mingw_pkg_prefix: mingw-w64-i686
+            local_dir: local32
+            mingwlibs_dir: win32
+            ffmpeg_build_args: --build32=yes --build64=no
+            vcvars_arch: x86
+            bits: 32bit
+            # Fixed repo path — project/Win32BuildSetup exists for all arches
+            addon_output_dir: project\Win32BuildSetup\BUILD_WIN32\addons
+          - arch: x64
+            cmake_arch: x64
+            dep_target: x64
+            msys_system: MINGW64
+            mingw_prefix: /mingw64
+            mingw_chost: x86_64-w64-mingw32
+            mingw_pkg_prefix: mingw-w64-x86_64
+            local_dir: local64
+            mingwlibs_dir: x64
+            ffmpeg_build_args: --build32=no --build64=yes
+            vcvars_arch: amd64
+            bits: 64bit
+            # Fixed repo path — project/Win32BuildSetup exists for all arches
+            addon_output_dir: project\Win32BuildSetup\BUILD_WIN32\addons
+
+    env:
+      WORKSPACE: ${{ github.workspace }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Prefer ORGANIZERRO_PAT; fall back to github.token for forks.
+          token: ${{ secrets.ORGANIZERRO_PAT != '' && secrets.ORGANIZERRO_PAT || github.token }}
+
+      # ---------------------------------------------------------------
+      # Cache the MinGW-built FFmpeg tree (arch-specific).
+      # buildffmpeg.sh --toolchain=msvc produces MSVC .lib files in
+      # project/BuildDependencies/mingwlibs/{win32|x64}/{lib,include}.
+      # Cache is invalidated when FFMPEG-VERSION or any build script changes.
+      # ---------------------------------------------------------------
+      - name: Cache MinGW-built FFmpeg libraries
+        uses: actions/cache@v4
+        id: mingw-cache
+        with:
+          path: |
+            project/BuildDependencies/mingwlibs
+          key: nexus-mingw-libs-${{ matrix.arch }}-${{ hashFiles('tools/depends/target/ffmpeg/FFMPEG-VERSION',
+                                              'tools/buildsteps/windows/make-mingwlibs.sh',
+                                              'tools/buildsteps/windows/buildhelpers.sh',
+                                              'tools/buildsteps/windows/buildffmpeg.sh',
+                                              'tools/buildsteps/windows/ffmpeg_options.txt',
+                                              'tools/buildsteps/windows/patches/*.patch') }}
+
+      # ---------------------------------------------------------------
+      # MSYS2 setup — always runs regardless of cache state.
+      # The windows-2022 runner ships MSYS2 at C:\msys64.
+      # ---------------------------------------------------------------
+
+      - name: Add MSYS2 to PATH
+        shell: cmd
+        run: |
+          echo C:\msys64\usr\bin>>%GITHUB_PATH%
+          echo C:\msys64\bin>>%GITHUB_PATH%
+
+      # Mount the workspace as C:\msys64\xbmc (junction).
+      # MSYS2 maps / to C:\msys64, so /xbmc/tools/... → workspace root.
+      # Also link MSYS2 into BuildDependencies so make-mingwlibs.sh can
+      # find sh.exe, awk.exe etc.  Junctions are silent if already present.
+      - name: Create MSYS2 junctions
+        shell: cmd
+        run: |
+          if not exist C:\msys64\xbmc mklink /j C:\msys64\xbmc %GITHUB_WORKSPACE%
+          if not exist %GITHUB_WORKSPACE%\project\BuildDependencies\msys64 mklink /j %GITHUB_WORKSPACE%\project\BuildDependencies\msys64 C:\msys64
+
+      # Write MSYS2 fstab so /depends/{arch}, /local{32|64}, /build, /downloads
+      # resolve to the BuildDependencies sub-directories that the build scripts
+      # expect (mirrors what download-msys2.bat does on a local dev box).
+      - name: Write MSYS2 fstab mounts
+        shell: cmd
+        run: |
+          set "BD=%GITHUB_WORKSPACE%\project\BuildDependencies"
+          if not exist "%BD%\${{ matrix.dep_target }}"                  mkdir "%BD%\${{ matrix.dep_target }}"
+          if not exist "%BD%\locals\${{ matrix.arch }}\lib"             mkdir "%BD%\locals\${{ matrix.arch }}\lib"
+          if not exist "%BD%\locals\${{ matrix.arch }}\include"         mkdir "%BD%\locals\${{ matrix.arch }}\include"
+          if not exist "%BD%\locals\${{ matrix.arch }}\etc"             mkdir "%BD%\locals\${{ matrix.arch }}\etc"
+          if not exist "%BD%\build"                                      mkdir "%BD%\build"
+          if not exist "%BD%\downloads"                                  mkdir "%BD%\downloads"
+          (
+            echo.
+            echo.%BD%\build\                          /build
+            echo.%BD%\downloads\                      /downloads
+            echo.%BD%\locals\${{ matrix.arch }}\      /${{ matrix.local_dir }}
+            echo.%BD%\${{ matrix.dep_target }}\        /depends/${{ matrix.dep_target }}
+          )>>C:\msys64\etc\fstab
+
+      # Download pre-built dependencies BEFORE the FFmpeg build.
+      # buildffmpeg.sh needs OpenSSL and dav1d from /depends/{arch}/{lib,include}
+      # (fstab-mounted to project/BuildDependencies/{dep_target}/).
+      # The script skips already-downloaded archives (idempotent).
+      - name: Download pre-built dependencies (pre-FFmpeg)
+        shell: cmd
+        run: call tools\buildsteps\windows\download-dependencies.bat ${{ matrix.dep_target }}
+
+      # ---------------------------------------------------------------
+      # MinGW / FFmpeg build — cache miss only
+      # ---------------------------------------------------------------
+
+      - name: Update MSYS2 package database
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: bash -lc "pacman --needed --noconfirm -Sy"
+
+      # Install MinGW GCC toolchain for the target architecture.
+      # gnutls is NOT required: buildffmpeg.sh enables --enable-openssl instead.
+      - name: Install MinGW build tools
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: >
+          bash -lc "pacman --needed --noconfirm -S
+          base-devel
+          autoconf
+          automake
+          libtool
+          git
+          wget
+          ${{ matrix.mingw_pkg_prefix }}-gcc
+          ${{ matrix.mingw_pkg_prefix }}-binutils
+          ${{ matrix.mingw_pkg_prefix }}-pkg-config
+          ${{ matrix.mingw_pkg_prefix }}-yasm"
+
+      # Write the profile.local that make-mingwlibs.sh sources at runtime.
+      # /${{ matrix.local_dir }}/etc is fstab-mounted to BuildDependencies/locals/{arch}/.
+      - name: Set up MinGW build environment
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          bash -c "printf 'export BITS=${{ matrix.bits }}\nexport LOCALBUILDDIR=/build\nexport LOCALDESTDIR=/${{ matrix.local_dir }}\nexport MINGW_PREFIX=${{ matrix.mingw_prefix }}\nexport MINGW_CHOST=${{ matrix.mingw_chost }}\nexport PKG_CONFIG_PATH=/${{ matrix.local_dir }}/lib/pkgconfig:${{ matrix.mingw_prefix }}/lib/pkgconfig\n' > /${{ matrix.local_dir }}/etc/profile.local"
+
+      # buildffmpeg.sh uses --toolchain=msvc so cl.exe must be in PATH.
+      # vcvarsall.bat loads the MSVC toolchain for the target architecture.
+      # MSYS2_PATH_TYPE=inherit keeps cl.exe / lib.exe visible inside bash --login.
+      - name: Build FFmpeg from source (MinGW assembler + MSVC linker)
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 60
+        shell: cmd
+        env:
+          MSYSTEM: ${{ matrix.msys_system }}
+          MSYS2_PATH_TYPE: inherit
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcvars_arch }}
+          bash --login -e -c "exec /xbmc/tools/buildsteps/windows/make-mingwlibs.sh --prompt=noprompt --mode=clean ${{ matrix.ffmpeg_build_args }}"
+
+      # Confirm that make-mingwlibs.sh installed the seven FFmpeg MSVC .lib files.
+      # With --toolchain=msvc the output is already in MSVC format (not .dll.a).
+      - name: Validate FFmpeg MSVC build outputs
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $mgDir = "$env:GITHUB_WORKSPACE\project\BuildDependencies\mingwlibs\${{ matrix.mingwlibs_dir }}"
+          $libs = @(
+            "lib\avcodec.lib", "lib\avformat.lib", "lib\avutil.lib",
+            "lib\swscale.lib", "lib\swresample.lib", "lib\postproc.lib",
+            "lib\avfilter.lib"
+          )
+          $failed = $false
+          foreach ($rel in $libs) {
+            $path = Join-Path $mgDir $rel
+            if (-not (Test-Path $path)) { Write-Error "Missing: $path"; $failed = $true }
+            else { Write-Host "OK: $($path | Split-Path -Leaf)" }
+          }
+          if (-not (Test-Path "$mgDir\include")) {
+            Write-Error "Missing: $mgDir\include"; $failed = $true
+          }
+          if ($failed) { exit 1 }
+          Write-Host "All FFmpeg MSVC libs validated under $mgDir"
+
+      # ---------------------------------------------------------------
+      # Steps that always run (cache hit or miss)
+      # ---------------------------------------------------------------
+
+      - name: Prepare system directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\system" | Out-Null
+
+      # Idempotent: download-dependencies.bat skips already-downloaded archives.
+      # This is a safety net to ensure all packages are present before CMake runs.
+      - name: Download pre-built dependencies (final)
+        shell: cmd
+        run: call tools\buildsteps\windows\download-dependencies.bat ${{ matrix.dep_target }}
+
+      # Configure Kodi with the Visual Studio 2022 generator for the target arch.
+      # cmake/scripts/windows/ArchSetup.cmake (included from root CMakeLists.txt)
+      # detects ARCH from CMAKE_SIZEOF_VOID_P (set by -A ${{ matrix.cmake_arch }}) and sets:
+      #   DEPENDS_PATH   = ${CMAKE_SOURCE_DIR}/project/BuildDependencies/${{ matrix.dep_target }}
+      #   MINGW_LIBS_DIR = ${CMAKE_SOURCE_DIR}/project/BuildDependencies/mingwlibs/${{ matrix.mingwlibs_dir }}
+      # Both directories are populated by the steps above; no extra -D flags are required.
+      - name: Configure Kodi with CMake (Visual Studio 17 2022, ${{ matrix.arch }})
+        shell: cmd
+        run: |
+          mkdir kodi-build
+          cd kodi-build
+          cmake -G "Visual Studio 17 2022" -A ${{ matrix.cmake_arch }} %GITHUB_WORKSPACE%
+
+      # Build all targets in RelWithDebInfo configuration.
+      # /MP parallel compilation is enabled by ArchSetup.cmake for VS generator.
+      - name: Build Kodi (RelWithDebInfo)
+        shell: cmd
+        working-directory: kodi-build
+        run: cmake --build . --target ALL_BUILD --config RelWithDebInfo --parallel
+
+      - name: Verify kodi.exe was produced
+        shell: pwsh
+        run: |
+          $exe = "$env:GITHUB_WORKSPACE\kodi-build\RelWithDebInfo\kodi.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Error "kodi.exe not found at $exe"
+            exit 1
+          }
+          Write-Host "kodi.exe ($((Get-Item $exe).Length) bytes)"
+
+      # ---------------------------------------------------------------
+      # Binary addon build
+      # ---------------------------------------------------------------
+
+      # Bootstrap fetches addon definitions (CMakeLists metadata) from
+      # cmake/addons/bootstrap/ into cmake/addons/addons/.
+      - name: Bootstrap addon definitions
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcvars_arch }}
+          call tools\buildsteps\windows\bootstrap-addons.bat
+
+      # visualization.milkdrop / visualization.milkdrop2 use __floor/__ceil as
+      # function pointers; MSVC 14.44+ treats these as pure intrinsics (C7552).
+      # Writing !windows to platforms.txt causes CMake to skip them entirely.
+      - name: Disable visualization.milkdrop addons on Windows (MSVC incompatible)
+        shell: pwsh
+        run: |
+          foreach ($addon in @("visualization.milkdrop", "visualization.milkdrop2")) {
+            $dir = "$env:GITHUB_WORKSPACE\cmake\addons\addons\$addon"
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Set-Content -Path "$dir\platforms.txt" -Value "!windows"
+            Write-Host "$addon: marked as !windows"
+          }
+
+      # Configure the addon build system and download addon source archives.
+      - name: Configure addons and download sources
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcvars_arch }}
+          if not exist cmake\addons\build  mkdir cmake\addons\build
+          if not exist cmake\addons\output mkdir cmake\addons\output
+          cd /d "%GITHUB_WORKSPACE%\cmake\addons\build"
+          cmake "%GITHUB_WORKSPACE%\cmake\addons" -G "NMake Makefiles" ^
+                -DCMAKE_BUILD_TYPE=Release ^
+                -DCMAKE_USER_MAKE_RULES_OVERRIDE="%GITHUB_WORKSPACE%\cmake\scripts\windows\CFlagOverrides.cmake" ^
+                -DCMAKE_USER_MAKE_RULES_OVERRIDE_CXX="%GITHUB_WORKSPACE%\cmake\scripts\windows\CXXFlagOverrides.cmake" ^
+                -DCMAKE_INSTALL_PREFIX="%GITHUB_WORKSPACE%\${{ matrix.addon_output_dir }}" ^
+                -DBUILD_DIR="%GITHUB_WORKSPACE%\cmake\addons\build" ^
+                -DADDON_DEPENDS_PATH="%GITHUB_WORKSPACE%\cmake\addons\output" ^
+                -DPACKAGE_ZIP=ON
+
+      # Set CL env var so cl.exe picks up _CRT_DECLARE_NONSTDC_NAMES=1 at
+      # every invocation regardless of CMake ExternalProject nesting depth.
+      # Fixes C2065 (PTRDIFF_MAX undeclared) in MSVC 14.44+ for addons that
+      # include <xlocnum> indirectly (e.g. imagedecoder.heif via libde265).
+      # This is a long-term workaround: MSVC 14.44 (VS 17.14) stopped declaring
+      # POSIX aliases like PTRDIFF_MAX in <stddef.h> by default as part of
+      # C11 conformance hardening.  Remove when affected addons migrate to
+      # <cstddef> or std::ptrdiff_t directly.
+      - name: Set CL env var for MSVC 14.44+ addon compatibility
+        shell: cmd
+        run: echo CL=/D_CRT_DECLARE_NONSTDC_NAMES=1>> %GITHUB_ENV%
+
+      # Build each addon individually so we can capture per-addon logs and
+      # continue past individual failures without stopping the whole job.
+      # The success/failure file pattern mirrors make-addons.bat.
+      - name: Build addons (continue on individual addon failure)
+        id: build-addons
+        continue-on-error: true
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcvars_arch }}
+          set "ADDONS_SUCCESS_FILE=%GITHUB_WORKSPACE%\cmake\addons\.success"
+          set "ADDONS_FAILURE_FILE=%GITHUB_WORKSPACE%\cmake\addons\.failure"
+          del /f "%ADDONS_SUCCESS_FILE%" 2>nul
+          del /f "%ADDONS_FAILURE_FILE%" 2>nul
+          set "ADDON_LOGS_DIR=%GITHUB_WORKSPACE%\cmake\addons\logs"
+          if not exist "%ADDON_LOGS_DIR%" mkdir "%ADDON_LOGS_DIR%"
+          cd /d "%GITHUB_WORKSPACE%\cmake\addons\build"
+          setlocal enabledelayedexpansion
+          set "ADDONS_TO_MAKE="
+          for /f "tokens=*" %%i in ('cmake --build . --target supported_addons 2^>^&1') do (
+            set "ln=%%i"
+            if not "!ln:ALL_ADDONS_BUILDING=!" == "!ln!" (
+              set "ADDONS_TO_MAKE=!ln:*ALL_ADDONS_BUILDING: =!"
+            )
+          )
+          for %%a in (!ADDONS_TO_MAKE!) do (
+            echo Building %%a...
+            set "ADDON_LOG=!ADDON_LOGS_DIR!\%%a.log"
+            cmake --build . --target %%a > "!ADDON_LOG!" 2>&1
+            if errorlevel 1 (
+              echo %%a >> "%ADDONS_FAILURE_FILE%"
+            ) else (
+              echo %%a >> "%ADDONS_SUCCESS_FILE%"
+            )
+          )
+          endlocal
+
+      # Upload addon build logs for debugging — always runs.
+      - name: Upload addon build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-addon-build-logs-${{ matrix.arch }}
+          path: |
+            cmake/addons/.failure
+            cmake/addons/.success
+            cmake/addons/logs/
+          if-no-files-found: ignore
+
+      # ---------------------------------------------------------------
+      # Stage all build output into a single flat directory
+      # ---------------------------------------------------------------
+
+      # The CMake ALL_BUILD target copies kodi.exe, dependency DLLs, system/,
+      # addons/, media/, and userdata/ into kodi-build/RelWithDebInfo/.
+      # We merge the binary addon output on top.
+      - name: Collect build output into staging directory
+        shell: pwsh
+        run: |
+          $staging = "$env:GITHUB_WORKSPACE\staging"
+          New-Item -ItemType Directory -Force $staging | Out-Null
+
+          # 1. Copy the main build tree (kodi.exe, DLLs, system/, addons/, media/, userdata/)
+          Copy-Item -Path "kodi-build\RelWithDebInfo\*" -Destination $staging -Recurse -Force
+          Write-Host "Copied kodi-build\RelWithDebInfo\ to staging"
+
+          # 2. Merge binary addon output (PVR, audiodecoder, etc.)
+          $addonSrc = "${{ matrix.addon_output_dir }}"
+          if (Test-Path $addonSrc) {
+            $addonDst = Join-Path $staging "addons"
+            if (-not (Test-Path $addonDst)) { New-Item -ItemType Directory -Path $addonDst | Out-Null }
+            Copy-Item -Path "$addonSrc\*" -Destination $addonDst -Recurse -Force
+            Write-Host "Merged binary addons from $addonSrc"
+          } else {
+            Write-Host "::warning::No binary addon output found at $addonSrc"
+          }
+
+          Write-Host "=== Staging root files ==="
+          Get-ChildItem $staging -File | ForEach-Object {
+            Write-Host "  $($_.Name) ($($_.Length) bytes)"
+          }
+          Write-Host "=== Staging directories ==="
+          Get-ChildItem $staging -Directory | ForEach-Object { Write-Host "  $($_.Name)/" }
+
+      - name: Validate staging directory
+        shell: pwsh
+        run: |
+          $staging = "$env:GITHUB_WORKSPACE\staging"
+          $failed = $false
+          if (-not (Test-Path "$staging\kodi.exe")) {
+            Write-Error "MISSING: kodi.exe"
+            $failed = $true
+          } else {
+            Write-Host "OK: kodi.exe ($((Get-Item "$staging\kodi.exe").Length) bytes)"
+          }
+          $dlls = Get-ChildItem $staging -Filter "*.dll" -File
+          if ($dlls.Count -eq 0) {
+            Write-Error "MISSING: No DLLs in staging root — dependency DLLs not copied"
+            $failed = $true
+          } else {
+            Write-Host "OK: $($dlls.Count) DLLs in staging root"
+          }
+          foreach ($dir in @("system", "addons", "media")) {
+            if (Test-Path "$staging\$dir") { Write-Host "OK: $dir/" }
+            else { Write-Host "::warning::$dir/ not found in staging" }
+          }
+          if ($failed) { exit 1 }
+          Write-Host "Staging validation passed"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kodi-nexus-windows-${{ matrix.arch }}
+          path: staging\
+          if-no-files-found: error
+
+      # ---------------------------------------------------------------
+      # GitHub Release — runs on push / workflow_dispatch only.
+      # Each arch creates its own arch-specific release tag so that
+      # both matrix jobs can publish releases concurrently without conflict.
+      # ---------------------------------------------------------------
+
+      - name: Compute next release version tag
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        id: version
+        shell: bash
+        run: |
+          # Find latest nexus-{arch}-v* tag reachable from HEAD
+          TAG_PATTERN="nexus-${{ matrix.arch }}-v*"
+          LATEST_TAG=$(git describe --tags --match "$TAG_PATTERN" --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LATEST_TAG" ]; then
+            NEXT="nexus-${{ matrix.arch }}-v20.5.1"
+            LOG_RANGE="HEAD"
+          else
+            VERSION="${LATEST_TAG#nexus-${{ matrix.arch }}-v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+            PATCH=$((PATCH + 1))
+            NEXT="nexus-${{ matrix.arch }}-v${MAJOR}.${MINOR}.${PATCH}"
+            LOG_RANGE="${LATEST_TAG}..HEAD"
+          fi
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "log_range=$LOG_RANGE" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT"
+
+      - name: Generate release notes
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        id: notes
+        shell: bash
+        run: |
+          LOG_RANGE="${{ steps.version.outputs.log_range }}"
+          {
+            echo 'body<<RELEASE_EOF'
+            echo '## Kodi Nexus 20 — Windows ${{ matrix.arch }} Build'
+            echo ''
+            echo '### Changes'
+            echo ''
+            if [ "$LOG_RANGE" = "HEAD" ]; then
+              git log --pretty="- %s" -20
+            else
+              git log --pretty="- %s" "$LOG_RANGE"
+            fi
+            echo ''
+            echo 'RELEASE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Package release zip
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        shell: pwsh
+        run: Compress-Archive -Path "staging\*" -DestinationPath "kodi-nexus-windows-${{ matrix.arch }}.zip"
+
+      - name: Create GitHub release
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        env:
+          GH_TOKEN: ${{ secrets.ORGANIZERRO_PAT != '' && secrets.ORGANIZERRO_PAT || github.token }}
+        shell: bash
+        run: |
+          # Delete any previous release for this tag (handles re-runs gracefully).
+          # Suppress "not found" errors (exit 1) which are expected on first run;
+          # log a warning for any other failure so permission issues remain visible.
+          gh release delete "${{ steps.version.outputs.tag }}" --yes 2>&1 \
+            | grep -v "release not found" || true
+          git push origin ":refs/tags/${{ steps.version.outputs.tag }}" 2>&1 \
+            | grep -v "remote: error: cannot lock ref\|error: failed to push" \
+            | grep -v "^$" || true
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "kodi-nexus-windows-${{ matrix.arch }}.zip" \
+            --title "Kodi Nexus ${{ steps.version.outputs.tag }}" \
+            --notes "${{ steps.notes.outputs.body }}" \
+            --target "${{ github.sha }}"
