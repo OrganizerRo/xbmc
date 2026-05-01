@@ -1,4 +1,4 @@
-name: Build Kodi Nexus for Windows x86
+name: Build Kodi Nexus for Windows
 
 # Repository secret ORGANIZERRO_PAT: same value as local .git/organizerro_pat.txt
 # (required for gh release as OrganizerRo).  Checkout falls back to github.token
@@ -31,8 +31,39 @@ permissions:
 
 jobs:
   build-kodi-nexus:
-    name: Build Kodi Nexus (Windows x86)
+    name: Build Kodi Nexus (Windows ${{ matrix.arch }})
     runs-on: windows-2022
+
+    # Both architectures run in parallel on separate runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            cmake_arch: Win32
+            dep_target: win32
+            msys_system: MINGW32
+            mingw_prefix: /mingw32
+            mingw_chost: i686-w64-mingw32
+            mingw_pkg_prefix: mingw-w64-i686
+            local_dir: local32
+            mingwlibs_dir: win32
+            ffmpeg_build_args: --build32=yes --build64=no
+            vcvars_arch: x86
+            bits: 32bit
+          - arch: x64
+            cmake_arch: x64
+            dep_target: x64
+            msys_system: MINGW64
+            mingw_prefix: /mingw64
+            mingw_chost: x86_64-w64-mingw32
+            mingw_pkg_prefix: mingw-w64-x86_64
+            local_dir: local64
+            mingwlibs_dir: x64
+            ffmpeg_build_args: --build32=no --build64=yes
+            vcvars_arch: amd64
+            bits: 64bit
+
     env:
       WORKSPACE: ${{ github.workspace }}
 
@@ -45,9 +76,9 @@ jobs:
           token: ${{ secrets.ORGANIZERRO_PAT != '' && secrets.ORGANIZERRO_PAT || github.token }}
 
       # ---------------------------------------------------------------
-      # Cache the MinGW-built FFmpeg tree.
+      # Cache the MinGW-built FFmpeg tree (arch-specific).
       # buildffmpeg.sh --toolchain=msvc produces MSVC .lib files in
-      # project/BuildDependencies/mingwlibs/win32/{lib,include}.
+      # project/BuildDependencies/mingwlibs/{win32|x64}/{lib,include}.
       # Cache is invalidated when FFMPEG-VERSION or any build script changes.
       # ---------------------------------------------------------------
       - name: Cache MinGW-built FFmpeg libraries
@@ -56,7 +87,7 @@ jobs:
         with:
           path: |
             project/BuildDependencies/mingwlibs
-          key: nexus-mingw-libs-${{ hashFiles('tools/depends/target/ffmpeg/FFMPEG-VERSION',
+          key: nexus-mingw-libs-${{ matrix.arch }}-${{ hashFiles('tools/depends/target/ffmpeg/FFMPEG-VERSION',
                                               'tools/buildsteps/windows/make-mingwlibs.sh',
                                               'tools/buildsteps/windows/buildhelpers.sh',
                                               'tools/buildsteps/windows/buildffmpeg.sh',
@@ -84,34 +115,34 @@ jobs:
           if not exist C:\msys64\xbmc mklink /j C:\msys64\xbmc %GITHUB_WORKSPACE%
           if not exist %GITHUB_WORKSPACE%\project\BuildDependencies\msys64 mklink /j %GITHUB_WORKSPACE%\project\BuildDependencies\msys64 C:\msys64
 
-      # Write MSYS2 fstab so /depends/win32, /local32, /build, /downloads
-      # resolve to the BuildDependencies sub-directories that the build
-      # scripts expect (mirrors what download-msys2.bat does locally).
+      # Write MSYS2 fstab so /depends/{arch}, /local{32|64}, /build, /downloads
+      # resolve to the BuildDependencies sub-directories that the build scripts
+      # expect (mirrors what download-msys2.bat does on a local dev box).
       - name: Write MSYS2 fstab mounts
         shell: cmd
         run: |
           set "BD=%GITHUB_WORKSPACE%\project\BuildDependencies"
-          if not exist "%BD%\win32"                  mkdir "%BD%\win32"
-          if not exist "%BD%\locals\win32\lib"       mkdir "%BD%\locals\win32\lib"
-          if not exist "%BD%\locals\win32\include"   mkdir "%BD%\locals\win32\include"
-          if not exist "%BD%\locals\win32\etc"       mkdir "%BD%\locals\win32\etc"
-          if not exist "%BD%\build"                  mkdir "%BD%\build"
-          if not exist "%BD%\downloads"              mkdir "%BD%\downloads"
+          if not exist "%BD%\${{ matrix.dep_target }}"                  mkdir "%BD%\${{ matrix.dep_target }}"
+          if not exist "%BD%\locals\${{ matrix.arch }}\lib"             mkdir "%BD%\locals\${{ matrix.arch }}\lib"
+          if not exist "%BD%\locals\${{ matrix.arch }}\include"         mkdir "%BD%\locals\${{ matrix.arch }}\include"
+          if not exist "%BD%\locals\${{ matrix.arch }}\etc"             mkdir "%BD%\locals\${{ matrix.arch }}\etc"
+          if not exist "%BD%\build"                                      mkdir "%BD%\build"
+          if not exist "%BD%\downloads"                                  mkdir "%BD%\downloads"
           (
             echo.
-            echo.%BD%\build\            /build
-            echo.%BD%\downloads\        /downloads
-            echo.%BD%\locals\win32\     /local32
-            echo.%BD%\win32\            /depends/win32
+            echo.%BD%\build\                          /build
+            echo.%BD%\downloads\                      /downloads
+            echo.%BD%\locals\${{ matrix.arch }}\      /${{ matrix.local_dir }}
+            echo.%BD%\${{ matrix.dep_target }}\        /depends/${{ matrix.dep_target }}
           )>>C:\msys64\etc\fstab
 
-      # Download pre-built Win32 dependencies BEFORE the FFmpeg build.
-      # buildffmpeg.sh needs OpenSSL and dav1d from /depends/win32/{lib,include}
-      # (fstab-mounted to project/BuildDependencies/win32/).
-      # The script skips existing archives so this is idempotent.
-      - name: Download pre-built Win32 dependencies (pre-FFmpeg)
+      # Download pre-built dependencies BEFORE the FFmpeg build.
+      # buildffmpeg.sh needs OpenSSL and dav1d from /depends/{arch}/{lib,include}
+      # (fstab-mounted to project/BuildDependencies/{dep_target}/).
+      # The script skips already-downloaded archives (idempotent).
+      - name: Download pre-built dependencies (pre-FFmpeg)
         shell: cmd
-        run: call tools\buildsteps\windows\download-dependencies.bat
+        run: call tools\buildsteps\windows\download-dependencies.bat ${{ matrix.dep_target }}
 
       # ---------------------------------------------------------------
       # MinGW / FFmpeg build — cache miss only
@@ -122,9 +153,9 @@ jobs:
         shell: cmd
         run: bash -lc "pacman --needed --noconfirm -Sy"
 
-      # Install MinGW32 GCC toolchain.  gnutls is NOT required: buildffmpeg.sh
-      # overrides ffmpeg_options.txt and enables --enable-openssl instead.
-      - name: Install MinGW32 build tools
+      # Install MinGW GCC toolchain for the target architecture.
+      # gnutls is NOT required: buildffmpeg.sh enables --enable-openssl instead.
+      - name: Install MinGW build tools
         if: steps.mingw-cache.outputs.cache-hit != 'true'
         shell: cmd
         run: >
@@ -135,32 +166,32 @@ jobs:
           libtool
           git
           wget
-          mingw-w64-i686-gcc
-          mingw-w64-i686-binutils
-          mingw-w64-i686-pkg-config
-          mingw-w64-i686-yasm"
+          ${{ matrix.mingw_pkg_prefix }}-gcc
+          ${{ matrix.mingw_pkg_prefix }}-binutils
+          ${{ matrix.mingw_pkg_prefix }}-pkg-config
+          ${{ matrix.mingw_pkg_prefix }}-yasm"
 
       # Write the profile.local that make-mingwlibs.sh sources at runtime.
-      # /local32, /build etc. are fstab-mounted to BuildDependencies/.
-      - name: Set up MinGW32 build environment
+      # /${{ matrix.local_dir }}/etc is fstab-mounted to BuildDependencies/locals/{arch}/.
+      - name: Set up MinGW build environment
         if: steps.mingw-cache.outputs.cache-hit != 'true'
         shell: cmd
         run: |
-          bash -c "printf 'export BITS=32bit\nexport LOCALBUILDDIR=/build\nexport LOCALDESTDIR=/local32\nexport MINGW_PREFIX=/mingw32\nexport MINGW_CHOST=i686-w64-mingw32\nexport PKG_CONFIG_PATH=/local32/lib/pkgconfig:/mingw32/lib/pkgconfig\n' > /local32/etc/profile.local"
+          bash -c "printf 'export BITS=${{ matrix.bits }}\nexport LOCALBUILDDIR=/build\nexport LOCALDESTDIR=/${{ matrix.local_dir }}\nexport MINGW_PREFIX=${{ matrix.mingw_prefix }}\nexport MINGW_CHOST=${{ matrix.mingw_chost }}\nexport PKG_CONFIG_PATH=/${{ matrix.local_dir }}/lib/pkgconfig:${{ matrix.mingw_prefix }}/lib/pkgconfig\n' > /${{ matrix.local_dir }}/etc/profile.local"
 
       # buildffmpeg.sh uses --toolchain=msvc so cl.exe must be in PATH.
-      # vcvars32.bat loads the x86 MSVC toolchain from VS 2022.
+      # vcvarsall.bat loads the MSVC toolchain for the target architecture.
       # MSYS2_PATH_TYPE=inherit keeps cl.exe / lib.exe visible inside bash --login.
       - name: Build FFmpeg from source (MinGW assembler + MSVC linker)
         if: steps.mingw-cache.outputs.cache-hit != 'true'
         timeout-minutes: 60
         shell: cmd
         env:
-          MSYSTEM: MINGW32
+          MSYSTEM: ${{ matrix.msys_system }}
           MSYS2_PATH_TYPE: inherit
         run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
-          bash --login -e -c "exec /xbmc/tools/buildsteps/windows/make-mingwlibs.sh --prompt=noprompt --mode=clean --build32=yes --build64=no"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcvars_arch }}
+          bash --login -e -c "exec /xbmc/tools/buildsteps/windows/make-mingwlibs.sh --prompt=noprompt --mode=clean ${{ matrix.ffmpeg_build_args }}"
 
       # Confirm that make-mingwlibs.sh installed the seven FFmpeg MSVC .lib files.
       # With --toolchain=msvc the output is already in MSVC format (not .dll.a).
@@ -168,7 +199,7 @@ jobs:
         if: steps.mingw-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          $mgDir = "$env:GITHUB_WORKSPACE\project\BuildDependencies\mingwlibs\win32"
+          $mgDir = "$env:GITHUB_WORKSPACE\project\BuildDependencies\mingwlibs\${{ matrix.mingwlibs_dir }}"
           $libs = @(
             "lib\avcodec.lib", "lib\avformat.lib", "lib\avutil.lib",
             "lib\swscale.lib", "lib\swresample.lib", "lib\postproc.lib",
@@ -197,23 +228,22 @@ jobs:
 
       # Idempotent: download-dependencies.bat skips already-downloaded archives.
       # This is a safety net to ensure all packages are present before CMake runs.
-      - name: Download pre-built Win32 dependencies (final)
+      - name: Download pre-built dependencies (final)
         shell: cmd
-        run: call tools\buildsteps\windows\download-dependencies.bat
+        run: call tools\buildsteps\windows\download-dependencies.bat ${{ matrix.dep_target }}
 
-      # Configure Kodi with the Visual Studio 2022 generator targeting x86.
+      # Configure Kodi with the Visual Studio 2022 generator for the target arch.
       # cmake/scripts/windows/ArchSetup.cmake (included from root CMakeLists.txt)
-      # detects ARCH=win32 from CMAKE_SIZEOF_VOID_P (set by -A Win32) and then sets:
-      #   DEPENDS_PATH = ${CMAKE_SOURCE_DIR}/project/BuildDependencies/win32
-      #   MINGW_LIBS_DIR = ${CMAKE_SOURCE_DIR}/project/BuildDependencies/mingwlibs/win32
-      # Both directories are populated by the download and FFmpeg build steps above;
-      # no extra -D flags are required.
-      - name: Configure Kodi with CMake (Visual Studio 17 2022, Win32)
+      # detects ARCH from CMAKE_SIZEOF_VOID_P (set by -A ${{ matrix.cmake_arch }}) and sets:
+      #   DEPENDS_PATH   = ${CMAKE_SOURCE_DIR}/project/BuildDependencies/${{ matrix.dep_target }}
+      #   MINGW_LIBS_DIR = ${CMAKE_SOURCE_DIR}/project/BuildDependencies/mingwlibs/${{ matrix.mingwlibs_dir }}
+      # Both directories are populated by the steps above; no extra -D flags are required.
+      - name: Configure Kodi with CMake (Visual Studio 17 2022, ${{ matrix.arch }})
         shell: cmd
         run: |
           mkdir kodi-build
           cd kodi-build
-          cmake -G "Visual Studio 17 2022" -A Win32 %GITHUB_WORKSPACE%
+          cmake -G "Visual Studio 17 2022" -A ${{ matrix.cmake_arch }} %GITHUB_WORKSPACE%
 
       # Build all targets in RelWithDebInfo configuration.
       # /MP parallel compilation is enabled by ArchSetup.cmake for VS generator.
@@ -241,7 +271,7 @@ jobs:
       - name: Bootstrap addon definitions
         shell: cmd
         run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcvars_arch }}
           call tools\buildsteps\windows\bootstrap-addons.bat
 
       # visualization.milkdrop / visualization.milkdrop2 use __floor/__ceil as
@@ -261,7 +291,7 @@ jobs:
       - name: Configure addons and download sources
         shell: cmd
         run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcvars_arch }}
           if not exist cmake\addons\build  mkdir cmake\addons\build
           if not exist cmake\addons\output mkdir cmake\addons\output
           cd /d "%GITHUB_WORKSPACE%\cmake\addons\build"
@@ -294,7 +324,7 @@ jobs:
         continue-on-error: true
         shell: cmd
         run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars32.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcvars_arch }}
           set "ADDONS_SUCCESS_FILE=%GITHUB_WORKSPACE%\cmake\addons\.success"
           set "ADDONS_FAILURE_FILE=%GITHUB_WORKSPACE%\cmake\addons\.failure"
           del /f "%ADDONS_SUCCESS_FILE%" 2>nul
@@ -327,7 +357,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-addon-build-logs
+          name: nexus-addon-build-logs-${{ matrix.arch }}
           path: |
             cmake/addons/.failure
             cmake/addons/.success
@@ -397,12 +427,14 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kodi-nexus-windows-x86
+          name: kodi-nexus-windows-${{ matrix.arch }}
           path: staging\
           if-no-files-found: error
 
       # ---------------------------------------------------------------
-      # GitHub Release — runs on push / workflow_dispatch only
+      # GitHub Release — runs on push / workflow_dispatch only.
+      # Each arch creates its own arch-specific release tag so that
+      # both matrix jobs can publish releases concurrently without conflict.
       # ---------------------------------------------------------------
 
       - name: Compute next release version tag
@@ -410,16 +442,17 @@ jobs:
         id: version
         shell: bash
         run: |
-          # Find latest nexus-v* tag reachable from HEAD
-          LATEST_TAG=$(git describe --tags --match "nexus-v*" --abbrev=0 2>/dev/null || echo "")
+          # Find latest nexus-{arch}-v* tag reachable from HEAD
+          TAG_PATTERN="nexus-${{ matrix.arch }}-v*"
+          LATEST_TAG=$(git describe --tags --match "$TAG_PATTERN" --abbrev=0 2>/dev/null || echo "")
           if [ -z "$LATEST_TAG" ]; then
-            NEXT="nexus-v20.5.1"
+            NEXT="nexus-${{ matrix.arch }}-v20.5.1"
             LOG_RANGE="HEAD"
           else
-            VERSION="${LATEST_TAG#nexus-v}"
+            VERSION="${LATEST_TAG#nexus-${{ matrix.arch }}-v}"
             IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
             PATCH=$((PATCH + 1))
-            NEXT="nexus-v${MAJOR}.${MINOR}.${PATCH}"
+            NEXT="nexus-${{ matrix.arch }}-v${MAJOR}.${MINOR}.${PATCH}"
             LOG_RANGE="${LATEST_TAG}..HEAD"
           fi
           echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
@@ -434,7 +467,7 @@ jobs:
           LOG_RANGE="${{ steps.version.outputs.log_range }}"
           {
             echo 'body<<RELEASE_EOF'
-            echo '## Kodi Nexus 20 — Windows x86 Build'
+            echo '## Kodi Nexus 20 — Windows ${{ matrix.arch }} Build'
             echo ''
             echo '### Changes'
             echo ''
@@ -450,7 +483,7 @@ jobs:
       - name: Package release zip
         if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
         shell: pwsh
-        run: Compress-Archive -Path "staging\*" -DestinationPath "kodi-nexus-windows-x86.zip"
+        run: Compress-Archive -Path "staging\*" -DestinationPath "kodi-nexus-windows-${{ matrix.arch }}.zip"
 
       - name: Create GitHub release
         if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
@@ -467,7 +500,7 @@ jobs:
             | grep -v "remote: error: cannot lock ref\|error: failed to push" \
             | grep -v "^$" || true
           gh release create "${{ steps.version.outputs.tag }}" \
-            kodi-nexus-windows-x86.zip \
+            "kodi-nexus-windows-${{ matrix.arch }}.zip" \
             --title "Kodi Nexus ${{ steps.version.outputs.tag }}" \
             --notes "${{ steps.notes.outputs.body }}" \
             --target "${{ github.sha }}"
