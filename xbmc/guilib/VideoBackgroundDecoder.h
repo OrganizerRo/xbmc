@@ -45,8 +45,8 @@ public:
   const uint8_t* GetCurrentFrame(int& width, int& height) const;
 
 private:
-  bool DecodeNextFrame();
-  void SeekToStart();
+  bool DecodeNextFrame(unsigned int currentTimeMs);
+  void SeekToStart(unsigned int currentTimeMs);
 
   AVFormatContext* m_fmtCtx;
   AVCodecContext* m_codecCtx;

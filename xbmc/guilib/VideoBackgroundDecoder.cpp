@@ -195,7 +195,7 @@ bool CVideoBackgroundDecoder::IsOpen() const
   return m_isOpen;
 }
 
-bool CVideoBackgroundDecoder::DecodeNextFrame()
+bool CVideoBackgroundDecoder::DecodeNextFrame(unsigned int currentTimeMs)
 {
   bool didSeek = false;
   AVPacket pkt;
@@ -210,7 +210,7 @@ bool CVideoBackgroundDecoder::DecodeNextFrame()
     {
       if (didSeek)
         return false;  // already tried looping — give up (corrupt/empty file)
-      SeekToStart();
+      SeekToStart(currentTimeMs);
       didSeek = true;
       continue;
     }
@@ -242,11 +242,11 @@ bool CVideoBackgroundDecoder::DecodeNextFrame()
   }
 }
 
-void CVideoBackgroundDecoder::SeekToStart()
+void CVideoBackgroundDecoder::SeekToStart(unsigned int currentTimeMs)
 {
   av_seek_frame(m_fmtCtx, m_videoStream, 0, AVSEEK_FLAG_BACKWARD);
   avcodec_flush_buffers(m_codecCtx);
-  m_nextFrameMs = 0;
+  m_nextFrameMs = currentTimeMs;
 }
 
 bool CVideoBackgroundDecoder::Update(unsigned int currentTimeMs)
@@ -255,7 +255,7 @@ bool CVideoBackgroundDecoder::Update(unsigned int currentTimeMs)
     return false;
 
   if (currentTimeMs >= m_nextFrameMs)
-    return DecodeNextFrame();
+    return DecodeNextFrame(currentTimeMs);
 
   return false;
 }
