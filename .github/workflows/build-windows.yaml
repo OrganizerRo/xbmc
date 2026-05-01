@@ -34,7 +34,10 @@ jobs:
     name: Build Kodi Nexus (Windows ${{ matrix.arch }})
     runs-on: windows-2022
 
-    # Both architectures run in parallel on separate runners.
+    # Win32 (x86) only — see docs/build/nexus-windows-build-plan.md §Architecture.
+    # x64 is deferred: 0_package.target-x64.list is missing giflib, libjpeg-turbo,
+    # libpng, libcec, shairplay, fstrcmp, dnssd, detours and libplist which are
+    # required by Nexus CMake and present only in the win32 package list.
     strategy:
       fail-fast: false
       matrix:
@@ -51,21 +54,6 @@ jobs:
             ffmpeg_build_args: --build32=yes --build64=no
             vcvars_arch: x86
             bits: 32bit
-            # Fixed repo path — project/Win32BuildSetup exists for all arches
-            addon_output_dir: project\Win32BuildSetup\BUILD_WIN32\addons
-          - arch: x64
-            cmake_arch: x64
-            dep_target: x64
-            msys_system: MINGW64
-            mingw_prefix: /mingw64
-            mingw_chost: x86_64-w64-mingw32
-            mingw_pkg_prefix: mingw-w64-x86_64
-            local_dir: local64
-            mingwlibs_dir: x64
-            ffmpeg_build_args: --build32=no --build64=yes
-            vcvars_arch: amd64
-            bits: 64bit
-            # Fixed repo path — project/Win32BuildSetup exists for all arches
             addon_output_dir: project\Win32BuildSetup\BUILD_WIN32\addons
 
     env:
@@ -195,7 +183,7 @@ jobs:
           MSYS2_PATH_TYPE: inherit
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcvars_arch }}
-          bash --login -e -c "exec /xbmc/tools/buildsteps/windows/make-mingwlibs.sh --prompt=noprompt --mode=clean ${{ matrix.ffmpeg_build_args }}"
+          bash --login -e -c "exec /xbmc/tools/buildsteps/windows/make-mingwlibs.sh --prompt=noprompt --mode=clean --win10=no ${{ matrix.ffmpeg_build_args }}"
 
       # Confirm that make-mingwlibs.sh installed the seven FFmpeg MSVC .lib files.
       # With --toolchain=msvc the output is already in MSVC format (not .dll.a).
@@ -341,7 +329,7 @@ jobs:
           for /f "tokens=*" %%i in ('cmake --build . --target supported_addons 2^>^&1') do (
             set "ln=%%i"
             if not "!ln:ALL_ADDONS_BUILDING=!" == "!ln!" (
-              set "ADDONS_TO_MAKE=!ln:*ALL_ADDONS_BUILDING: =!"
+              set "ADDONS_TO_MAKE=!ln:ALL_ADDONS_BUILDING: =!"
             )
           )
           for %%a in (!ADDONS_TO_MAKE!) do (
