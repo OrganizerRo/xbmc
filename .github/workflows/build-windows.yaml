@@ -51,6 +51,8 @@ jobs:
             ffmpeg_build_args: --build32=yes --build64=no
             vcvars_arch: x86
             bits: 32bit
+            # Fixed repo path — project/Win32BuildSetup exists for all arches
+            addon_output_dir: project\Win32BuildSetup\BUILD_WIN32\addons
           - arch: x64
             cmake_arch: x64
             dep_target: x64
@@ -63,6 +65,8 @@ jobs:
             ffmpeg_build_args: --build32=no --build64=yes
             vcvars_arch: amd64
             bits: 64bit
+            # Fixed repo path — project/Win32BuildSetup exists for all arches
+            addon_output_dir: project\Win32BuildSetup\BUILD_WIN32\addons
 
     env:
       WORKSPACE: ${{ github.workspace }}
@@ -299,7 +303,7 @@ jobs:
                 -DCMAKE_BUILD_TYPE=Release ^
                 -DCMAKE_USER_MAKE_RULES_OVERRIDE="%GITHUB_WORKSPACE%\cmake\scripts\windows\CFlagOverrides.cmake" ^
                 -DCMAKE_USER_MAKE_RULES_OVERRIDE_CXX="%GITHUB_WORKSPACE%\cmake\scripts\windows\CXXFlagOverrides.cmake" ^
-                -DCMAKE_INSTALL_PREFIX="%GITHUB_WORKSPACE%\project\Win32BuildSetup\BUILD_WIN32\addons" ^
+                -DCMAKE_INSTALL_PREFIX="%GITHUB_WORKSPACE%\${{ matrix.addon_output_dir }}" ^
                 -DBUILD_DIR="%GITHUB_WORKSPACE%\cmake\addons\build" ^
                 -DADDON_DEPENDS_PATH="%GITHUB_WORKSPACE%\cmake\addons\output" ^
                 -DPACKAGE_ZIP=ON
@@ -382,7 +386,7 @@ jobs:
           Write-Host "Copied kodi-build\RelWithDebInfo\ to staging"
 
           # 2. Merge binary addon output (PVR, audiodecoder, etc.)
-          $addonSrc = "project\Win32BuildSetup\BUILD_WIN32\addons"
+          $addonSrc = "${{ matrix.addon_output_dir }}"
           if (Test-Path $addonSrc) {
             $addonDst = Join-Path $staging "addons"
             if (-not (Test-Path $addonDst)) { New-Item -ItemType Directory -Path $addonDst | Out-Null }
