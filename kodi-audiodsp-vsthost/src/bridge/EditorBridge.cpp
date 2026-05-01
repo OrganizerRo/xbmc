@@ -699,8 +699,11 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
         std::lock_guard<std::mutex> lock(m_editorMutex);
         if (m_openEditors.count(pluginPath))
         {
-            // Bring existing window to front
+            // Bring existing window to front (restore first if minimized)
             HWND existing = m_openEditors[pluginPath];
+            if (IsIconic(existing))
+                ShowWindow(existing, SW_RESTORE);
+            BringWindowToTop(existing);
             SetForegroundWindow(existing);
             return;
         }
@@ -869,9 +872,21 @@ void EditorBridge::doOpenEditor(const std::string& pluginPath)
         }
     }
 
-    // Show the window
-    ShowWindow(hwnd, SW_SHOW);
+    // Show the window and bring it to the foreground.
+    // SW_SHOWNORMAL activates the window in the normal (non-minimised) state.
+    // Windows restricts SetForegroundWindow() when the calling thread does not
+    // own the foreground (e.g. when the user has another application focused).
+    // The flash-topmost trick — momentarily granting WS_EX_TOPMOST then
+    // immediately revoking it — reliably bypasses this restriction without
+    // leaving the window permanently on top.  Any visual flicker is at most
+    // one frame and is acceptable given that the window is about to become the
+    // active foreground window.
+    ShowWindow(hwnd, SW_SHOWNORMAL);
     UpdateWindow(hwnd);
+    SetWindowPos(hwnd, HWND_TOPMOST,   0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    BringWindowToTop(hwnd);
+    SetForegroundWindow(hwnd);
 }
 
 void EditorBridge::doCloseEditor(const std::string& pluginPath)
