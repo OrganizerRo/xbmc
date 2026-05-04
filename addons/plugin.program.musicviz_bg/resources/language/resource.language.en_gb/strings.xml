@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<strings>
+  <!-- Menu labels -->
+  <string id="32001">Manage Directories</string>
+  <string id="32002">Browse Media</string>
+  <string id="32003">Current Background</string>
+  <string id="32004">None (default fanart)</string>
+  <string id="32005">Clear Background</string>
+
+  <!-- Directory management -->
+  <string id="32006">Add Directory</string>
+  <string id="32007">Remove Directory</string>
+  <string id="32008">Select Background Directory</string>
+
+  <!-- Context menu items on media items -->
+  <string id="32010">Set as Background</string>
+  <string id="32011">Preview</string>
+
+  <!-- Notifications -->
+  <string id="32020">Directory added</string>
+  <string id="32021">No directories configured. Use Manage Directories to add one.</string>
+  <string id="32022">Background set</string>
+  <string id="32023">Background cleared</string>
+</strings>

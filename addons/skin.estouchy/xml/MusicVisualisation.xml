@@ -2,7 +2,44 @@
 <window>
 	<defaultcontrol></defaultcontrol>
 	<onunload>ClearProperty(PopupMenuVisible,Home)</onunload>
+	<!-- Restart background video when the window loads (no-op when music is playing) -->
+	<onload condition="String.IsEqual(Skin.String(musicviz_bg_type),video) + !String.IsEmpty(Skin.String(musicviz_bg_path)) + !Player.HasMedia">PlayMedia($INFO[Skin.String(musicviz_bg_path)],1,noresume)</onload>
+	<onload condition="String.IsEqual(Skin.String(musicviz_bg_type),video) + Player.HasVideo">PlayerControl(RepeatOne)</onload>
 	<controls>
+		<!-- Custom image background (managed by plugin.program.musicviz_bg) -->
+		<control type="image">
+			<description>custom_bg_image</description>
+			<posx>0</posx>
+			<posy>0</posy>
+			<aspectratio>scale</aspectratio>
+			<include>ScreenWidth</include>
+			<height>960</height>
+			<texture background="true">$INFO[Skin.String(musicviz_bg_path)]</texture>
+			<fadetime>FanartCrossfadeTime</fadetime>
+			<visible>!String.IsEmpty(Skin.String(musicviz_bg_path)) + !String.IsEqual(Skin.String(musicviz_bg_type),video)</visible>
+		</control>
+		<!-- Custom video background window — visible when video is actively playing -->
+		<control type="videowindow">
+			<description>custom_bg_video</description>
+			<posx>0</posx>
+			<posy>0</posy>
+			<include>ScreenWidth</include>
+			<height>960</height>
+			<visible>String.IsEqual(Skin.String(musicviz_bg_type),video) + !String.IsEmpty(Skin.String(musicviz_bg_path)) + Player.HasVideo</visible>
+		</control>
+		<!-- Fallback: attempt to render video file as texture when Player.HasVideo is false -->
+		<control type="image">
+			<description>custom_bg_video_static</description>
+			<posx>0</posx>
+			<posy>0</posy>
+			<aspectratio>scale</aspectratio>
+			<include>ScreenWidth</include>
+			<height>960</height>
+			<texture background="true">$INFO[Skin.String(musicviz_bg_path)]</texture>
+			<fadetime>FanartCrossfadeTime</fadetime>
+			<visible>String.IsEqual(Skin.String(musicviz_bg_type),video) + !String.IsEmpty(Skin.String(musicviz_bg_path)) + !Player.HasVideo</visible>
+		</control>
+		<!-- Default fanart background (shown when no custom background is set) -->
 		<control type="image">
 			<description>fanart</description>
 			<posx>0</posx>
@@ -12,6 +49,7 @@
 			<texture background="true">$INFO[Player.Art(fanart)]</texture>
 			<aspectratio>scale</aspectratio>
 			<fadetime>FanartCrossfadeTime</fadetime>
+			<visible>String.IsEmpty(Skin.String(musicviz_bg_path))</visible>
 		</control>
 		<control type="visualisation" id="2">
 			<description>visualisation</description>
