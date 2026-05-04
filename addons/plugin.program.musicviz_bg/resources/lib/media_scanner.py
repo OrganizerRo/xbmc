@@ -50,9 +50,7 @@ def scan_directory(dirpath):
         mtype = media_type(filename)
         if mtype is None:
             continue
-        # Build the full path respecting trailing slash
-        sep = '' if dirpath.endswith('/') or dirpath.endswith(os.sep) else '/'
-        full_path = dirpath + sep + filename
+        full_path = os.path.join(dirpath, filename)
         items.append({'path': full_path, 'name': filename, 'type': mtype})
 
     return items

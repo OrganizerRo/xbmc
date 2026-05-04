@@ -223,11 +223,15 @@ def show_manage_dirs():
     xbmcplugin.endOfDirectory(HANDLE)
 
 
+# dialog.browse() returns this sentinel when the user cancels
+_BROWSE_CANCELLED = 'files'
+
+
 def do_add_dir():
     """Open a folder-browser dialog and add the chosen directory."""
     dialog = xbmcgui.Dialog()
     chosen = dialog.browse(0, ADDON.getLocalizedString(32008), 'files')
-    if chosen and chosen != 'files':
+    if chosen and chosen != _BROWSE_CANCELLED:
         added = add_dir(DATA_DIR, chosen)
         if added:
             xbmcgui.Dialog().notification(
