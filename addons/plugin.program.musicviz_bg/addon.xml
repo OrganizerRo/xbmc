@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.program.musicviz_bg"
+       name="Music Viz Background Manager"
+       version="1.0.0"
+       provider-name="Kodi Community">
+  <requires>
+    <import addon="xbmc.python" version="2.1.0"/>
+  </requires>
+
+  <extension point="xbmc.python.pluginsource" library="default.py">
+    <provides>programs</provides>
+  </extension>
+
+  <extension point="xbmc.addon.metadata">
+    <platform>all</platform>
+    <summary lang="en_GB">Manage the MusicVisualisation background for the Estouchy skin</summary>
+    <description lang="en_GB">Add directories of images and videos, preview them, and set any file as the custom background for the Music Visualisation window in the Estouchy skin. The selected background replaces the default artist fanart while music plays.</description>
+    <license>GPL-2.0-or-later</license>
+  </extension>
+</addon>
